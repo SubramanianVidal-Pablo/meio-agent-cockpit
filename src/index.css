@@ -1,0 +1,23 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+* { box-sizing: border-box; }
+body { background: #F8FAFC; color: #0F172A; font-family: 'Inter', system-ui, sans-serif; }
+
+.fade-in { animation: fadeIn 0.2s ease-in-out; }
+@keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+
+/* Recharts tooltips */
+.recharts-tooltip-wrapper { border-radius: 8px !important; }
+.recharts-default-tooltip { border-radius: 8px !important; border: 1px solid #E2E8F0 !important; box-shadow: 0 4px 6px rgba(0,0,0,0.07) !important; }
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: #F1F5F9; }
+::-webkit-scrollbar-thumb { background: #CBD5E1; border-radius: 10px; }
+
+/* Range input */
+input[type=range] { -webkit-appearance: none; width: 100%; height: 6px; border-radius: 3px; background: #E2E8F0; outline: none; }
+input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 18px; height: 18px; border-radius: 50%; background: #0F766E; cursor: pointer; border: 2px solid white; box-shadow: 0 1px 3px rgba(0,0,0,0.2); }
