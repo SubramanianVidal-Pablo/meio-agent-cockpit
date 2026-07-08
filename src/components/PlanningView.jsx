@@ -1153,11 +1153,6 @@ export default function PlanningView({ skus, scenario, setScenario, ssMultiplier
         onEchelonChange={setEchelonFilter}
       />
 
-      {/* Where to Play + Action list */}
-      <div className="col-span-2">
-        <ActionList skus={skus} optimized={optimized} scenario={scenario} summary={summary} />
-      </div>
-
       {/* Full optimisation table */}
       <div ref={tableRef}>
         <OptimizationTable optimized={optimized} highlightedSku={highlightedSku} />
