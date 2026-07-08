@@ -1,7 +1,7 @@
 import { useState, useRef } from 'react';
 import {
   Target, Shield, TrendingDown, TrendingUp, AlertTriangle,
-  ChevronDown, ChevronUp, Info, Loader2, CheckCircle2,
+  ChevronDown, ChevronUp, Info, Loader2, CheckCircle2, Clock,
 } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -931,28 +931,53 @@ const ACTION_SEVERITY = {
 function OptimizationTable({ optimized, highlightedSku, onDecision }) {
   const [filter, setFilter] = useState('action');
   const [sort, setSort] = useState({ key: 'urgencyRank', dir: 1 });
-  const [accepted, setAccepted] = useState({});   // skuId → true
+  const [rowStates, setRowStates] = useState({});  // skuId → 'accepted' | 'deferred'
   const rowRefs = useRef({});
 
+  function buildEntry(s, plannerAction, decision) {
+    const sev  = ACTION_SEVERITY[plannerAction];
+    const sign = s.delta >= 0 ? '+' : '';
+    const wks  = s.avgDailyDemand > 0
+      ? (Math.abs(s.delta) / (s.avgDailyDemand * 7)).toFixed(1)
+      : '—';
+    return {
+      timestamp:      new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      decision,
+      severity:       sev.label,
+      severityColor:  decision === 'open' ? '#92400E' : sev.color,
+      sigType:        decision === 'open' ? 'Inventory Decision Deferred' : 'Inventory Recommendation Accepted',
+      affected:       `${s.id} — ${s.name}`,
+      recommendation: `${plannerAction} ${Math.abs(s.delta).toLocaleString()} units (${sign}${wks} wks supply) to reach MEIO target · WC impact: ${s.wcImpact >= 0 ? '+' : ''}${fmt$(s.wcImpact)}`,
+      openItem: {
+        skuId:        s.id,
+        skuName:      s.name,
+        plannerAction,
+        meioDelta:    s.delta,
+        meioTarget:   s.meioSafetyStock,
+        currentSS:    s.currentSafetyStock,
+        wcImpact:     s.wcImpact,
+        avgDailyDemand: s.avgDailyDemand ?? 0,
+        resolved:     false,
+      },
+    };
+  }
+
   function handleAccept(s) {
-    if (accepted[s.id]) return;
-    setAccepted(prev => ({ ...prev, [s.id]: true }));
+    if (rowStates[s.id]) return;
     const plannerAction = getPlannerAction(s.delta, s.meioSafetyStock);
     const sev = ACTION_SEVERITY[plannerAction];
     if (!sev || !onDecision) return;
-    const sign = s.delta >= 0 ? '+' : '';
-    const wks = s.avgDailyDemand > 0
-      ? (Math.abs(s.delta) / (s.avgDailyDemand * 7)).toFixed(1)
-      : '—';
-    onDecision({
-      timestamp:     new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      decision:      'accepted',
-      severity:      sev.label,
-      severityColor: sev.color,
-      sigType:       'Inventory Recommendation Accepted',
-      affected:      `${s.id} — ${s.name}`,
-      recommendation: `${plannerAction} ${Math.abs(s.delta).toLocaleString()} units (${sign}${wks} wks supply) to reach MEIO target · WC impact: ${s.wcImpact >= 0 ? '+' : ''}${fmt$(s.wcImpact)}`,
-    });
+    setRowStates(prev => ({ ...prev, [s.id]: 'accepted' }));
+    onDecision(buildEntry(s, plannerAction, 'accepted'));
+  }
+
+  function handleDefer(s) {
+    if (rowStates[s.id]) return;
+    const plannerAction = getPlannerAction(s.delta, s.meioSafetyStock);
+    const sev = ACTION_SEVERITY[plannerAction];
+    if (!sev || !onDecision) return;
+    setRowStates(prev => ({ ...prev, [s.id]: 'deferred' }));
+    onDecision(buildEntry(s, plannerAction, 'open'));
   }
 
   const urgencyRank = { critical: 0, high: 1, medium: 2, low: 3 };
@@ -1054,22 +1079,32 @@ function OptimizationTable({ optimized, highlightedSku, onDecision }) {
                   <td className={`px-4 py-2.5 text-right font-semibold ${s.wcImpact > 0 ? 'text-success' : s.wcImpact < 0 ? 'text-danger' : 'text-muted'}`}>
                     {s.wcImpact > 0 ? '+' : ''}{fmt$(Math.abs(s.wcImpact))}
                   </td>
-                  <td className="px-4 py-2.5 text-right">
-                    {accepted[s.id] ? (
+                  <td className="px-4 py-2.5">
+                    {rowStates[s.id] === 'accepted' ? (
                       <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-teal-50 text-teal-700 border border-teal-200 whitespace-nowrap">
                         <CheckCircle2 className="w-3 h-3" /> Accepted
                       </span>
+                    ) : rowStates[s.id] === 'deferred' ? (
+                      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200 whitespace-nowrap">
+                        <Clock className="w-3 h-3" /> Open Item
+                      </span>
                     ) : ACTION_SEVERITY[plannerAction] ? (
-                      <button
-                        onClick={() => handleAccept(s)}
-                        className="px-3 py-1 rounded-lg text-[11px] font-semibold border transition-colors whitespace-nowrap hover:opacity-80"
-                        style={{ color: ACTION_SEVERITY[plannerAction].color, borderColor: ACTION_SEVERITY[plannerAction].color + '50', background: ACTION_SEVERITY[plannerAction].color + '10' }}
-                      >
-                        Accept
-                      </button>
-                    ) : (
-                      <span className="text-faint text-xs">—</span>
-                    )}
+                      <div className="flex gap-1.5">
+                        <button
+                          onClick={() => handleAccept(s)}
+                          className="px-2.5 py-1 rounded-lg text-[11px] font-semibold border transition-colors whitespace-nowrap hover:opacity-80"
+                          style={{ color: ACTION_SEVERITY[plannerAction].color, borderColor: ACTION_SEVERITY[plannerAction].color + '50', background: ACTION_SEVERITY[plannerAction].color + '10' }}
+                        >
+                          Accept
+                        </button>
+                        <button
+                          onClick={() => handleDefer(s)}
+                          className="px-2.5 py-1 rounded-lg text-[11px] font-semibold border border-amber-200 text-amber-700 bg-amber-50 transition-colors whitespace-nowrap hover:bg-amber-100"
+                        >
+                          Defer
+                        </button>
+                      </div>
+                    ) : null}
                   </td>
                 </tr>
               );
