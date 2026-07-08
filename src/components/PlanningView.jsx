@@ -268,15 +268,6 @@ function ControlBar({ scenario, setScenario }) {
 }
 
 // ── Top-line KPI summary (6 cards, above all other content) ──────────────────
-// Last quarterly MEIO run snapshot — realistic ±5–12% variance from current portfolio
-const PREV_RUN = {
-  totalInvValue:  148e6,   // $148M last quarter → ~8% below current Conservative
-  wcOpportunity:   9.2e6,  // $9.2M → slightly below current
-  skusAbove:       10,     // fewer SKUs above target last quarter
-  skusBelow:        2,     // 2 SKUs were below target
-  avgDoh:         108,     // 108d avg → current is ~7d higher
-  inStockRate:     94,     // 94% → now improved to 100%
-};
 
 // Per-scenario KPI adjustment factors so all 6 cards shift directionally
 // Conservative = higher buffers = more inventory held = more SKUs above lean thresholds
@@ -328,21 +319,6 @@ function computeToplineKPIs(skus, scenario) {
   return { totalInvValue, wcOpportunity, skusAbove, skusBelow, avgDoh, tierAvgs, inStockRate };
 }
 
-function TrendArrow({ current, prev, higherIsBetter = true }) {
-  if (prev == null) return null;
-  const up = current > prev;
-  const good = higherIsBetter ? up : !up;
-  const color = good ? '#059669' : '#DC2626';
-  const symbol = up ? '▲' : '▼';
-  const pct = prev !== 0 ? Math.abs(((current - prev) / prev) * 100).toFixed(1) : '—';
-  return (
-    <span className="text-[10px] font-bold ml-1 leading-none" style={{ color }}>
-      {symbol} {pct}%{' '}
-      <span className="font-normal text-slate-400">vs. last qtr</span>
-    </span>
-  );
-}
-
 function ToplineKPIs({ skus, scenario, lastRun }) {
   const m = computeToplineKPIs(skus, scenario);
   const total = skus.length;
@@ -357,7 +333,6 @@ function ToplineKPIs({ skus, scenario, lastRun }) {
       color: '#0F172A',
       border: '#E2E8F0',
       bg: '#FFFFFF',
-      trend: <TrendArrow current={m.totalInvValue} prev={PREV_RUN.totalInvValue} higherIsBetter={false} />,
     },
     {
       id: 'wc',
@@ -367,8 +342,6 @@ function ToplineKPIs({ skus, scenario, lastRun }) {
       color: '#166534',
       border: '#A7F3D0',
       bg: '#F0FDF4',
-      accent: true,
-      trend: <TrendArrow current={m.wcOpportunity} prev={PREV_RUN.wcOpportunity} higherIsBetter={true} />,
     },
     {
       id: 'above',
@@ -378,7 +351,6 @@ function ToplineKPIs({ skus, scenario, lastRun }) {
       color: '#B45309',
       border: '#FDE68A',
       bg: '#FFFBEB',
-      trend: <TrendArrow current={m.skusAbove} prev={PREV_RUN.skusAbove} higherIsBetter={false} />,
     },
     {
       id: 'below',
@@ -388,7 +360,6 @@ function ToplineKPIs({ skus, scenario, lastRun }) {
       color: '#DC2626',
       border: '#FCA5A5',
       bg: '#FEF2F2',
-      trend: <TrendArrow current={m.skusBelow} prev={PREV_RUN.skusBelow} higherIsBetter={false} />,
     },
     {
       id: 'doh',
@@ -398,7 +369,6 @@ function ToplineKPIs({ skus, scenario, lastRun }) {
       color: '#4F46E5',
       border: '#C7D2FE',
       bg: '#EEF2FF',
-      trend: <TrendArrow current={m.avgDoh} prev={PREV_RUN.avgDoh} higherIsBetter={false} />,
     },
     {
       id: 'instock',
@@ -408,7 +378,6 @@ function ToplineKPIs({ skus, scenario, lastRun }) {
       color: m.inStockRate >= IN_STOCK_TARGET ? '#166534' : '#DC2626',
       border: m.inStockRate >= IN_STOCK_TARGET ? '#A7F3D0' : '#FCA5A5',
       bg:    m.inStockRate >= IN_STOCK_TARGET ? '#F0FDF4'  : '#FEF2F2',
-      trend: <TrendArrow current={m.inStockRate} prev={PREV_RUN.inStockRate} higherIsBetter={true} />,
     },
   ];
 
@@ -429,7 +398,6 @@ function ToplineKPIs({ skus, scenario, lastRun }) {
               <span className="text-2xl font-black leading-none" style={{ color: c.color }}>
                 {c.value}
               </span>
-              {c.trend}
             </div>
             <div className="text-[10px] text-slate-400 leading-tight">{c.sub}</div>
           </div>
@@ -442,7 +410,7 @@ function ToplineKPIs({ skus, scenario, lastRun }) {
           Based on MEIO run: <span className="font-semibold text-slate-500">{lastRun}</span>
         </span>
         <span className="text-[10px] text-slate-400 italic">
-          % change vs. last quarterly MEIO run · Values update on Rerun MEIO
+          All values update on Rerun MEIO
         </span>
       </div>
     </div>
