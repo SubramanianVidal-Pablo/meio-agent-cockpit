@@ -268,15 +268,14 @@ function ControlBar({ scenario, setScenario }) {
 }
 
 // ── Top-line KPI summary (6 cards, above all other content) ──────────────────
-// Simulated "previous run" deltas — represent change vs last quarterly MEIO run
-// Previous quarterly run — values are close to current so trends show realistic ±5–15% movements
+// Last quarterly MEIO run snapshot — realistic ±5–12% variance from current portfolio
 const PREV_RUN = {
-  totalInvValue:  352e6,    // ~$352M last quarter
-  wcOpportunity:   65e6,    // ~$65M last quarter
-  skusAbove:       22,
-  skusBelow:        3,
-  avgDoh:         115,
-  inStockRate:     88,
+  totalInvValue:  148e6,   // $148M last quarter → ~8% below current Conservative
+  wcOpportunity:   9.2e6,  // $9.2M → slightly below current
+  skusAbove:       10,     // fewer SKUs above target last quarter
+  skusBelow:        2,     // 2 SKUs were below target
+  avgDoh:         108,     // 108d avg → current is ~7d higher
+  inStockRate:     94,     // 94% → now improved to 100%
 };
 
 // Per-scenario KPI adjustment factors so all 6 cards shift directionally
@@ -337,8 +336,9 @@ function TrendArrow({ current, prev, higherIsBetter = true }) {
   const symbol = up ? '▲' : '▼';
   const pct = prev !== 0 ? Math.abs(((current - prev) / prev) * 100).toFixed(1) : '—';
   return (
-    <span className="text-[10px] font-bold ml-1" style={{ color }}>
-      {symbol} {pct}%
+    <span className="text-[10px] font-bold ml-1 leading-none" style={{ color }}>
+      {symbol} {pct}%{' '}
+      <span className="font-normal text-slate-400">vs. last qtr</span>
     </span>
   );
 }
@@ -442,7 +442,7 @@ function ToplineKPIs({ skus, scenario, lastRun }) {
           Based on MEIO run: <span className="font-semibold text-slate-500">{lastRun}</span>
         </span>
         <span className="text-[10px] text-slate-400 italic">
-          Trend vs. previous quarterly run · All values update on Rerun MEIO
+          % change vs. last quarterly MEIO run · Values update on Rerun MEIO
         </span>
       </div>
     </div>
