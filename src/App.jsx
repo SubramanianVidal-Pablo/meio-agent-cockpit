@@ -197,7 +197,7 @@ export default function App() {
 
             {/* Scenario context pill — scenario label only, no per-tier SS multipliers */}
             <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-surface border border-border-light text-xs">
-              <span className="text-muted">Scenario:</span>
+              <span className="text-muted">Risk Profile:</span>
               <span className="font-semibold text-ink">{SCENARIO_LABELS[scenario] ?? scenario}</span>
             </div>
 
@@ -239,7 +239,7 @@ export default function App() {
       <main>
         <div className="max-w-screen-xl mx-auto px-6 py-6">
           {activeTab === 'plan' && (
-            <PlanningView skus={SKU_DATA} {...sharedCtx} />
+            <PlanningView skus={SKU_DATA} {...sharedCtx} onDecision={handleDecision} />
           )}
           {activeTab === 'simulate' && (
             <SimulationChat skus={SKU_DATA} onDecision={handleDecision} scenarios={scenarios} onScenariosChange={setScenarios} onApply={handleApply} />

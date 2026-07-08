@@ -1,7 +1,7 @@
 import { useState, useRef } from 'react';
 import {
   Target, Shield, TrendingDown, TrendingUp, AlertTriangle,
-  ChevronDown, ChevronUp, Info, Loader2,
+  ChevronDown, ChevronUp, Info, Loader2, CheckCircle2,
 } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -922,10 +922,38 @@ function GapCell({ delta, meioSafetyStock, avgDailyDemand }) {
   );
 }
 
-function OptimizationTable({ optimized, highlightedSku }) {
+const ACTION_SEVERITY = {
+  Expedite:  { color: '#DC2626', label: 'EXPEDITE' },
+  Replenish: { color: '#B45309', label: 'REPLENISH' },
+  Reduce:    { color: '#1D4ED8', label: 'REDUCE' },
+};
+
+function OptimizationTable({ optimized, highlightedSku, onDecision }) {
   const [filter, setFilter] = useState('action');
   const [sort, setSort] = useState({ key: 'urgencyRank', dir: 1 });
+  const [accepted, setAccepted] = useState({});   // skuId → true
   const rowRefs = useRef({});
+
+  function handleAccept(s) {
+    if (accepted[s.id]) return;
+    setAccepted(prev => ({ ...prev, [s.id]: true }));
+    const plannerAction = getPlannerAction(s.delta, s.meioSafetyStock);
+    const sev = ACTION_SEVERITY[plannerAction];
+    if (!sev || !onDecision) return;
+    const sign = s.delta >= 0 ? '+' : '';
+    const wks = s.avgDailyDemand > 0
+      ? (Math.abs(s.delta) / (s.avgDailyDemand * 7)).toFixed(1)
+      : '—';
+    onDecision({
+      timestamp:     new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      decision:      'accepted',
+      severity:      sev.label,
+      severityColor: sev.color,
+      sigType:       'Inventory Recommendation Accepted',
+      affected:      `${s.id} — ${s.name}`,
+      recommendation: `${plannerAction} ${Math.abs(s.delta).toLocaleString()} units (${sign}${wks} wks supply) to reach MEIO target · WC impact: ${s.wcImpact >= 0 ? '+' : ''}${fmt$(s.wcImpact)}`,
+    });
+  }
 
   const urgencyRank = { critical: 0, high: 1, medium: 2, low: 3 };
 
@@ -978,11 +1006,12 @@ function OptimizationTable({ optimized, highlightedSku }) {
                 { label: 'DoH',            key: 'doh' },
                 { label: 'Gap vs. MEIO Target', key: 'delta' },
                 { label: 'WC Impact',      key: 'wcImpact' },
+                { label: '',              key: '_accept', noSort: true },
               ].map(col => (
                 <th key={col.key}
-                  onClick={() => toggleSort(col.key)}
-                  className="px-4 py-2.5 text-left cursor-pointer hover:text-ink select-none whitespace-nowrap">
-                  {col.label}<SortIcon col={col.key} />
+                  onClick={() => !col.noSort && toggleSort(col.key)}
+                  className={`px-4 py-2.5 text-left select-none whitespace-nowrap ${col.noSort ? '' : 'cursor-pointer hover:text-ink'}`}>
+                  {col.label}{!col.noSort && <SortIcon col={col.key} />}
                 </th>
               ))}
             </tr>
@@ -1025,6 +1054,23 @@ function OptimizationTable({ optimized, highlightedSku }) {
                   <td className={`px-4 py-2.5 text-right font-semibold ${s.wcImpact > 0 ? 'text-success' : s.wcImpact < 0 ? 'text-danger' : 'text-muted'}`}>
                     {s.wcImpact > 0 ? '+' : ''}{fmt$(Math.abs(s.wcImpact))}
                   </td>
+                  <td className="px-4 py-2.5 text-right">
+                    {accepted[s.id] ? (
+                      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-teal-50 text-teal-700 border border-teal-200 whitespace-nowrap">
+                        <CheckCircle2 className="w-3 h-3" /> Accepted
+                      </span>
+                    ) : ACTION_SEVERITY[plannerAction] ? (
+                      <button
+                        onClick={() => handleAccept(s)}
+                        className="px-3 py-1 rounded-lg text-[11px] font-semibold border transition-colors whitespace-nowrap hover:opacity-80"
+                        style={{ color: ACTION_SEVERITY[plannerAction].color, borderColor: ACTION_SEVERITY[plannerAction].color + '50', background: ACTION_SEVERITY[plannerAction].color + '10' }}
+                      >
+                        Accept
+                      </button>
+                    ) : (
+                      <span className="text-faint text-xs">—</span>
+                    )}
+                  </td>
                 </tr>
               );
             })}
@@ -1036,7 +1082,7 @@ function OptimizationTable({ optimized, highlightedSku }) {
 }
 
 // ── Root ─────────────────────────────────────────────────────────────────────
-export default function PlanningView({ skus, scenario, setScenario, ssMultipliers, setSsMultipliers, onNavigate }) {
+export default function PlanningView({ skus, scenario, setScenario, ssMultipliers, setSsMultipliers, onNavigate, onDecision }) {
   const [rerunState, setRerunState] = useState('idle'); // idle | running | done
   const [toast, setToast]           = useState('');
   const [highlightedSku, setHighlightedSku] = useState(null);
@@ -1155,7 +1201,7 @@ export default function PlanningView({ skus, scenario, setScenario, ssMultiplier
 
       {/* Full optimisation table */}
       <div ref={tableRef}>
-        <OptimizationTable optimized={optimized} highlightedSku={highlightedSku} />
+        <OptimizationTable optimized={optimized} highlightedSku={highlightedSku} onDecision={onDecision} />
       </div>
 
     </div>
