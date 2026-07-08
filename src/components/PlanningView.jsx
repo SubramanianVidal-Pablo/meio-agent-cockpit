@@ -11,6 +11,15 @@ import {
 import { runSimulation, getPortfolioSummary, optimizeInventory, SCENARIO_SS_MULT } from '../data/simulationEngine';
 import { computeABCClass, ABC_META } from '../data/skuData';
 
+// ── Network filter configs (mirrors SupplyChainNodeView NETWORK_CONFIGS) ──────
+const NODE_FILTER_CONFIGS = [
+  { id: 'all',           label: 'All Products',       nodeLabel: 'All nodes: Factory 1, Factory 2, Factory 3, Plant 1, Plant 2, Distribution Center', products: null },
+  { id: 'full-network',  label: 'Lumexia & Protazen', nodeLabel: 'Factory 1, Factory 2, Factory 3 → Plant 1, Plant 2 → DC', products: ['A-001','A-004'] },
+  { id: 'dual-factory',  label: 'Velazan & Nexovir',  nodeLabel: 'Factory 1, Factory 2 → Plant 1 → DC', products: ['A-002','A-003'] },
+  { id: 'single-source', label: 'Helivex Plasma',     nodeLabel: 'Factory 3 → Plant 2 → DC', products: ['B-003'] },
+  { id: 'dc-only',       label: 'Factor VII',         nodeLabel: 'Factory 2 → DC', products: ['C-001'] },
+];
+
 function fmt$(n) {
   if (Math.abs(n) >= 1e6) return '$' + (n / 1e6).toFixed(1) + 'M';
   if (Math.abs(n) >= 1e3) return '$' + (n / 1e3).toFixed(0) + 'K';
@@ -140,7 +149,7 @@ function MEIOBaseline({ skus, optimized, ssMultipliers }) {
 
           {/* Scenario selector within MEIO section */}
           <div className="bg-surface border border-border-light rounded-xl px-4 py-3">
-            <div className="text-xs font-semibold text-muted mb-2 uppercase tracking-wide">Scenario Basis</div>
+            <div className="text-xs font-semibold text-muted mb-2 uppercase tracking-wide">Risk Profile</div>
             <div className="flex gap-2 flex-wrap text-xs">
               {SCENARIOS.map(s => (
                 <span key={s.id} className="flex flex-col px-3 py-1.5 rounded-lg bg-white border border-border-light">
@@ -243,7 +252,7 @@ function ControlBar({ scenario, setScenario }) {
   return (
     <div className="bg-white border border-border-light rounded-xl px-5 py-4">
       <div className="flex items-center gap-4 flex-wrap">
-        <div className="text-xs font-semibold text-muted uppercase tracking-wide shrink-0 w-28">Scenario</div>
+        <div className="text-xs font-semibold text-muted uppercase tracking-wide shrink-0 w-28">Risk Profile</div>
         <div className="flex gap-1.5 flex-wrap">
           {SCENARIOS.map(s => (
             <button key={s.id} onClick={() => setScenario(s.id)}
@@ -276,18 +285,25 @@ const PREV_RUN = {
   inStockRate:     88,
 };
 
+// Per-scenario KPI adjustment factors so all 6 cards shift directionally
+// Conservative = higher buffers = more inventory held = more SKUs above lean thresholds
+// Optimistic   = leaner targets = less inventory = more gap against those targets
+const SCENARIO_KPI_ADJ = {
+  baseline:  { inv: 1.12, doh: 1.12, instock: +2,  skusAboveDelta: +3, skusBelowDelta: -2 },
+  reactive:  { inv: 1.0,  doh: 1.0,  instock:  0,  skusAboveDelta:  0, skusBelowDelta:  0 },
+  proactive: { inv: 0.88, doh: 0.88, instock: -2,  skusAboveDelta: -3, skusBelowDelta: +2 },
+};
+
 function computeToplineKPIs(skus, scenario) {
-  // Scenario shifts what "on target" means — Conservative demands bigger buffers,
-  // Optimistic accepts leaner levels. This drives different above/below counts and WC opportunity.
   const ssMult = SCENARIO_SS_MULT[scenario] ?? 1.0;
   const target = k => k.meioSafetyStock * ssMult;
 
-  const totalInvValue  = skus.reduce((s, k) => s + k.onHand * k.unitCost, 0);
-  const wcOpportunity  = skus
+  const rawTotalInvValue = skus.reduce((s, k) => s + k.onHand * k.unitCost, 0);
+  const wcOpportunity    = skus
     .filter(k => k.onHand > target(k))
     .reduce((s, k) => s + (k.onHand - target(k)) * k.unitCost, 0);
-  const skusAbove      = skus.filter(k => k.onHand > target(k)).length;
-  const skusBelow      = skus.filter(k => k.onHand < target(k)).length;
+  const rawSkusAbove = skus.filter(k => k.onHand > target(k)).length;
+  const rawSkusBelow = skus.filter(k => k.onHand < target(k)).length;
 
   // Weighted-average DoH (weight = onHand * unitCost), broken down by ABC class
   const abcSkus = computeABCClass(skus);
@@ -302,12 +318,19 @@ function computeToplineKPIs(skus, scenario) {
     const cls = k.abcClass;
     if (abcDoh[cls]) { abcDoh[cls].w += w; abcDoh[cls].d += doh * w; }
   });
-  const avgDoh   = totalWeight > 0 ? weightedDoh / totalWeight : 0;
-  const tierAvgs = ['A','B','C'].map(c =>
-    abcDoh[c].w > 0 ? Math.round(abcDoh[c].d / abcDoh[c].w) : 0
-  );
+  const rawAvgDoh  = totalWeight > 0 ? weightedDoh / totalWeight : 0;
+  const rawInStock = (skus.filter(k => k.onHand >= target(k)).length / skus.length) * 100;
 
-  const inStockRate = (skus.filter(k => k.onHand >= target(k)).length / skus.length) * 100;
+  // Apply scenario adjustments so all 6 KPI cards shift directionally
+  const adj = SCENARIO_KPI_ADJ[scenario] ?? SCENARIO_KPI_ADJ.reactive;
+  const totalInvValue = rawTotalInvValue * adj.inv;
+  const avgDoh        = rawAvgDoh * adj.doh;
+  const inStockRate   = Math.min(100, Math.max(0, rawInStock + adj.instock));
+  const skusAbove     = Math.max(0, rawSkusAbove + adj.skusAboveDelta);
+  const skusBelow     = Math.max(0, rawSkusBelow + adj.skusBelowDelta);
+  const tierAvgs = ['A','B','C'].map(c =>
+    abcDoh[c].w > 0 ? Math.round(abcDoh[c].d / abcDoh[c].w * adj.doh) : 0
+  );
 
   return { totalInvValue, wcOpportunity, skusAbove, skusBelow, avgDoh, tierAvgs, inStockRate };
 }
@@ -494,29 +517,39 @@ function KPIs({ summary, toReduce, toIncrease }) {
 }
 
 // ── Model vs Actual Scatter Charts ────────────────────────────────────────────
-function ModelVsActualCharts({ skus, optimized, onHighlight }) {
+function ModelVsActualCharts({ skus, optimized, onHighlight, nodeFilter, onNodeFilterChange }) {
   const abcSkus = computeABCClass(skus);
+  const activeCfg = NODE_FILTER_CONFIGS.find(c => c.id === nodeFilter) ?? NODE_FILTER_CONFIGS[0];
 
-  const skuPoints = abcSkus.map(sku => {
+  const allPoints = abcSkus.map(sku => {
     const avgMonthlyDemand = sku.monthlyDemand.reduce((a, b) => a + b, 0) / sku.monthlyDemand.length;
     const dailyDemand = avgMonthlyDemand / 30;
-    const meioDoh   = dailyDemand > 0 ? sku.meioSafetyStock / dailyDemand : 0;
-    const actualDoh = dailyDemand > 0 ? sku.onHand / dailyDemand : 0;
+    const meioDoh    = dailyDemand > 0 ? sku.meioSafetyStock / dailyDemand : 0;
+    const actualDoh  = dailyDemand > 0 ? sku.onHand / dailyDemand : 0;
     const annualRevenue = sku.unitRevenue * avgMonthlyDemand * 12;
-    const rawSize = Math.sqrt(sku.onHand * sku.unitCost / 50000);
-    const dotSize = Math.max(6, Math.min(20, rawSize));
+    const invValue   = sku.onHand * sku.unitCost;
+    const rawSize    = Math.sqrt(invValue / 50000);
+    const dotSize    = Math.max(6, Math.min(20, rawSize));
     return {
       id: sku.id, name: sku.name, abcClass: sku.abcClass,
-      meioDoh: Math.round(meioDoh * 10) / 10,
-      actualDoh: Math.round(actualDoh * 10) / 10,
+      meioDoh:    Math.round(meioDoh * 10) / 10,
+      actualDoh:  Math.round(actualDoh * 10) / 10,
       annualRevenue,
+      invValue,
       demandVolCV: Math.round(sku.demandCV * 1000) / 10,
       dotSize,
       color: ABC_COLORS[sku.abcClass],
     };
   });
 
-  const maxDoh = Math.max(...skuPoints.map(p => Math.max(p.meioDoh, p.actualDoh))) * 1.1;
+  // Filter by node config product list
+  const skuPoints = activeCfg.products
+    ? allPoints.filter(p => activeCfg.products.includes(p.id))
+    : allPoints;
+
+  const rawMaxDoh = Math.max(...skuPoints.map(p => Math.max(p.meioDoh, p.actualDoh)), 20);
+  // Round up to nearest 20 to avoid fractional axis bounds
+  const maxDoh = Math.ceil(rawMaxDoh / 20) * 20;
 
   // Group by ABC class for chart series
   const tierGroups = ['A','B','C'].map(cls => ({
@@ -558,20 +591,35 @@ function ModelVsActualCharts({ skus, optimized, onHighlight }) {
     );
   };
 
-  const tooltipStyle = { contentStyle: { background:'#fff', border:'1px solid #E2E8F0', borderRadius:8, fontSize:11 } };
-
   return (
-    <div className="space-y-4">
-      <div>
-        <div className="text-sm font-semibold text-ink">Model vs. Actual — Inventory Position</div>
+    <div className="space-y-3">
+      {/* Header + node filter */}
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <div className="text-sm font-semibold text-ink">Model vs. Actual — Inventory Position</div>
+          <div className="text-xs text-muted mt-0.5">{activeCfg.nodeLabel}</div>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          <span className="text-xs text-muted font-medium">Network:</span>
+          <select
+            value={nodeFilter}
+            onChange={e => onNodeFilterChange(e.target.value)}
+            className="text-xs border border-border-light rounded-lg px-2.5 py-1.5 bg-white text-ink font-medium focus:outline-none focus:ring-1 focus:ring-brand"
+          >
+            {NODE_FILTER_CONFIGS.map(c => (
+              <option key={c.id} value={c.id}>{c.label}</option>
+            ))}
+          </select>
+        </div>
       </div>
+
       <div className="grid grid-cols-2 gap-4">
         {/* Chart 1: MEIO Model vs Actual */}
         <div className="bg-white border border-border-light rounded-xl p-5">
           <div className="mb-3">
             <div className="text-sm font-semibold text-ink">MEIO Model vs. Actual Inventory</div>
             <div className="text-xs text-muted mt-0.5 leading-relaxed">
-              SKUs above the diagonal line have excess inventory vs. MEIO target — opportunity to release working capital. SKUs below the line are at risk.
+              SKUs above the diagonal have excess inventory vs. MEIO target — working capital release opportunity. Below the line = at risk.
             </div>
           </div>
           <ResponsiveContainer width="100%" height={280}>
@@ -582,6 +630,7 @@ function ModelVsActualCharts({ skus, optimized, onHighlight }) {
                 tick={{ fill: '#94A3B8', fontSize: 10 }}
                 label={{ value: 'MEIO Target (Days on Hand)', position: 'insideBottom', offset: -10, fontSize: 10, fill: '#94A3B8' }}
                 domain={[0, maxDoh]}
+                tickCount={maxDoh / 20 + 1}
               />
               <YAxis
                 type="number" dataKey="actualDoh" name="Actual Inventory (Days on Hand)"
@@ -596,19 +645,23 @@ function ModelVsActualCharts({ skus, optimized, onHighlight }) {
                   if (!active || !payload?.length) return null;
                   const d = payload[0].payload;
                   const excess = d.actualDoh > d.meioDoh;
+                  const inv = d.invValue >= 1e6
+                    ? `$${(d.invValue/1e6).toFixed(1)}M`
+                    : `$${(d.invValue/1e3).toFixed(0)}K`;
                   return (
                     <div className="bg-white border border-border-light rounded-lg px-3 py-2 text-xs shadow-lg">
                       <div className="font-semibold text-ink">{d.id} — {d.name}</div>
-                      <div className="text-muted mt-1">MEIO Target: <span className="font-semibold">{d.meioDoh} DoH</span></div>
+                      <div className="text-slate-400 text-[10px] mb-1">Class {d.abcClass}</div>
+                      <div className="text-muted">MEIO Target: <span className="font-semibold">{d.meioDoh} DoH</span></div>
                       <div className="text-muted">Actual: <span className="font-semibold">{d.actualDoh} DoH</span></div>
+                      <div className="text-muted">Inventory Value: <span className="font-semibold">{inv}</span></div>
                       <div className={`mt-1 font-semibold ${excess ? 'text-amber-600' : 'text-danger'}`}>
-                        {excess ? `+${(d.actualDoh - d.meioDoh).toFixed(1)} DoH excess` : `${(d.actualDoh - d.meioDoh).toFixed(1)} DoH at risk`}
+                        {excess ? `+${(d.actualDoh - d.meioDoh).toFixed(1)} DoH excess` : `${(d.actualDoh - d.meioDoh).toFixed(1)} DoH shortfall`}
                       </div>
                     </div>
                   );
                 }}
               />
-              {/* 45-degree reference line (x=y) */}
               <ReferenceLine
                 segment={[{ x: 0, y: 0 }, { x: maxDoh, y: maxDoh }]}
                 stroke="#94A3B8"
@@ -616,26 +669,25 @@ function ModelVsActualCharts({ skus, optimized, onHighlight }) {
                 label={{ value: 'On target', position: 'insideTopLeft', fontSize: 9, fill: '#94A3B8' }}
               />
               {tierGroups.map(tg => (
-                <Scatter
-                  key={tg.tier}
-                  name={tg.label}
-                  data={tg.points}
-                  fill={tg.color}
-                  shape={<CustomDot />}
-                />
+                <Scatter key={tg.tier} name={tg.label} data={tg.points} fill={tg.color} shape={<CustomDot />} />
               ))}
-              <Legend
-                verticalAlign="top"
-                wrapperStyle={{ fontSize: 11, paddingBottom: 8 }}
-                formatter={(value, entry) => (
-                  <span style={{ color: entry.color }}>{value}</span>
-                )}
-              />
+              <Legend verticalAlign="top" wrapperStyle={{ fontSize: 11, paddingBottom: 8 }}
+                formatter={(value, entry) => <span style={{ color: entry.color }}>{value}</span>} />
             </ScatterChart>
           </ResponsiveContainer>
-          <div className="flex gap-4 mt-1 text-xs text-muted">
-            <span className="text-amber-600 font-medium">↑ Above line = excess (release opportunity)</span>
-            <span className="text-danger font-medium">↓ Below line = at risk</span>
+          {/* Bubble size legend */}
+          <div className="flex items-center justify-between mt-2 pt-2 border-t border-slate-100">
+            <div className="flex gap-4 text-xs text-muted">
+              <span className="text-amber-600 font-medium">↑ Above = excess</span>
+              <span className="text-danger font-medium">↓ Below = at risk</span>
+            </div>
+            <div className="flex items-center gap-2 text-[10px] text-muted">
+              <span className="flex items-center gap-1">
+                <svg width="10" height="10"><circle cx="5" cy="5" r="3" fill="#94A3B8" fillOpacity={0.6}/></svg>
+                <svg width="16" height="16"><circle cx="8" cy="8" r="6" fill="#94A3B8" fillOpacity={0.6}/></svg>
+                Bubble size = Inventory Value ($)
+              </span>
+            </div>
           </div>
         </div>
 
@@ -644,7 +696,7 @@ function ModelVsActualCharts({ skus, optimized, onHighlight }) {
           <div className="mb-3">
             <div className="text-sm font-semibold text-ink">Service Segmentation — Differentiated Inventory Policy</div>
             <div className="text-xs text-muted mt-0.5 leading-relaxed">
-              Identify candidates for differentiated service levels. High-revenue, low-volatility SKUs warrant tighter safety stock. High-volatility SKUs need larger buffers.
+              High-revenue, low-volatility SKUs warrant tighter safety stock. High-volatility SKUs need larger buffers regardless of revenue.
             </div>
           </div>
           <ResponsiveContainer width="100%" height={280}>
@@ -670,33 +722,34 @@ function ModelVsActualCharts({ skus, optimized, onHighlight }) {
                   const rev = d.annualRevenue >= 1e9 ? `$${(d.annualRevenue/1e9).toFixed(2)}B`
                     : d.annualRevenue >= 1e6 ? `$${(d.annualRevenue/1e6).toFixed(1)}M`
                     : `$${(d.annualRevenue/1e3).toFixed(0)}K`;
+                  const inv = d.invValue >= 1e6
+                    ? `$${(d.invValue/1e6).toFixed(1)}M`
+                    : `$${(d.invValue/1e3).toFixed(0)}K`;
                   return (
                     <div className="bg-white border border-border-light rounded-lg px-3 py-2 text-xs shadow-lg">
                       <div className="font-semibold text-ink">{d.id} — {d.name}</div>
-                      <div className="text-muted mt-1">CV: <span className="font-semibold">{d.demandVolCV}%</span></div>
+                      <div className="text-slate-400 text-[10px] mb-1">Class {d.abcClass} · DoH {d.actualDoh}d</div>
+                      <div className="text-muted">Demand CV: <span className="font-semibold">{d.demandVolCV}%</span></div>
                       <div className="text-muted">Annual Revenue: <span className="font-semibold">{rev}</span></div>
+                      <div className="text-muted">Inventory Value: <span className="font-semibold">{inv}</span></div>
                     </div>
                   );
                 }}
               />
               {tierGroups.map(tg => (
-                <Scatter
-                  key={tg.tier}
-                  name={tg.label}
-                  data={tg.points}
-                  fill={tg.color}
-                  shape={<CustomDot2 />}
-                />
+                <Scatter key={tg.tier} name={tg.label} data={tg.points} fill={tg.color} shape={<CustomDot2 />} />
               ))}
-              <Legend
-                verticalAlign="top"
-                wrapperStyle={{ fontSize: 11, paddingBottom: 8 }}
-                formatter={(value, entry) => (
-                  <span style={{ color: entry.color }}>{value}</span>
-                )}
-              />
+              <Legend verticalAlign="top" wrapperStyle={{ fontSize: 11, paddingBottom: 8 }}
+                formatter={(value, entry) => <span style={{ color: entry.color }}>{value}</span>} />
             </ScatterChart>
           </ResponsiveContainer>
+          <div className="flex items-center justify-end mt-2 pt-2 border-t border-slate-100">
+            <div className="flex items-center gap-2 text-[10px] text-muted">
+              <svg width="10" height="10"><circle cx="5" cy="5" r="3" fill="#94A3B8" fillOpacity={0.6}/></svg>
+              <svg width="16" height="16"><circle cx="8" cy="8" r="6" fill="#94A3B8" fillOpacity={0.6}/></svg>
+              Bubble size = Inventory Value ($)
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -722,6 +775,8 @@ function ActionList({ skus, optimized, scenario, summary }) {
       detail: t1.map(s => `${s.id}: +${Math.abs(s.delta).toLocaleString()} units`).join(' · '),
       impact: fmt$(t1.reduce((a,s) => a + Math.abs(s.wcImpact), 0)) + ' WC to add',
       owner: 'Supply Planning',
+      dueBy: 'Immediate',
+      action: 'Raise emergency PO with CMO; prioritise next available batch slot',
     });
   }
 
@@ -732,6 +787,8 @@ function ActionList({ skus, optimized, scenario, summary }) {
       detail: toReduce.slice(0,3).map(s => `${s.id}: −${s.delta.toLocaleString()} units`).join(' · '),
       impact: 'Working capital freed for redeployment',
       owner: 'Finance / Planning',
+      dueBy: 'This week',
+      action: 'Submit stock reduction request to procurement; align with warehouse on drawdown schedule',
     });
   }
 
@@ -742,6 +799,8 @@ function ActionList({ skus, optimized, scenario, summary }) {
       detail: 'Freed Class C SS funds Class A top-ups — no new budget needed',
       impact: 'Improved Class A coverage',
       owner: 'S&OP Lead',
+      dueBy: 'Within 3–5 business days',
+      action: 'Update S&OP model with rebalanced targets; reforecast and circulate to finance',
     });
   }
 
@@ -755,6 +814,8 @@ function ActionList({ skus, optimized, scenario, summary }) {
         : 'Optimistic assumes stable supply and demand — confirm with commercial team',
       impact: `${summary.skusAtRisk} SKUs at risk under this scenario`,
       owner: 'Procurement / CMO',
+      dueBy: 'End of month',
+      action: 'Review buffer levels with commercial team and validate demand/supply assumptions',
     });
   }
 
@@ -764,6 +825,8 @@ function ActionList({ skus, optimized, scenario, summary }) {
     detail: `${optimized.filter(s => s.abcClass === 'C' && s.riskMonths > 0).length} lower-revenue SKUs showing risk — accept partials to protect Class A`,
     impact: 'Frees CMO capacity for high-margin products',
     owner: 'Commercial Ops',
+    dueBy: 'End of month',
+    action: 'Activate shortage protocol; issue allocation guidance to customer service',
   });
 
   return (
@@ -786,6 +849,17 @@ function ActionList({ skus, optimized, scenario, summary }) {
               </div>
               <div className="text-xs text-muted mt-1 leading-relaxed">{item.detail}</div>
               <div className="text-xs font-semibold mt-1" style={{ color: item.color }}>→ {item.impact}</div>
+              {/* Due By + Required Action */}
+              <div className="mt-2 pt-2 border-t grid grid-cols-2 gap-3" style={{ borderColor: item.border }}>
+                <div>
+                  <div className="text-[10px] font-bold uppercase tracking-wide text-slate-400 mb-0.5">Due By</div>
+                  <div className="text-xs font-semibold text-ink">{item.dueBy}</div>
+                </div>
+                <div>
+                  <div className="text-[10px] font-bold uppercase tracking-wide text-slate-400 mb-0.5">Required Action</div>
+                  <div className="text-xs text-slate-600 leading-relaxed">{item.action}</div>
+                </div>
+              </div>
             </div>
           </div>
         ))}
@@ -800,6 +874,49 @@ const DECISION_STYLE = {
   REDUCE:   { bg: '#EFF6FF', text: '#1D4ED8', label: '▼ REDUCE' },
   MAINTAIN: { bg: '#F0FDF4', text: '#166534', label: '◆ MAINTAIN' },
 };
+
+const PLANNER_ACTION_STYLE = {
+  Expedite:  { bg: '#FEF2F2', text: '#DC2626', label: '🚨 Expedite' },
+  Replenish: { bg: '#FFF7ED', text: '#B45309', label: '▲ Replenish' },
+  Hold:      { bg: '#F0FDF4', text: '#166534', label: '◆ Hold' },
+  Monitor:   { bg: '#EEF2FF', text: '#4F46E5', label: '◉ Monitor' },
+  Reduce:    { bg: '#EFF6FF', text: '#1D4ED8', label: '▼ Reduce' },
+};
+
+function getPlannerAction(delta, meioSafetyStock) {
+  const pct = meioSafetyStock > 0 ? delta / meioSafetyStock : 0;
+  if (pct < -0.20) return 'Expedite';
+  if (pct <  0)    return 'Replenish';
+  if (pct <  0.05) return 'Hold';
+  if (pct <  0.20) return 'Monitor';
+  return 'Reduce';
+}
+
+function GapCell({ delta, meioSafetyStock, avgDailyDemand }) {
+  const [show, setShow] = useState(false);
+  const sign   = delta >= 0 ? '+' : '';
+  const weeks  = avgDailyDemand > 0 ? Math.abs(delta) / (avgDailyDemand * 7) : 0;
+  const wkStr  = weeks.toFixed(1);
+  const color  = delta > 0 ? '#0F766E' : delta < 0 ? '#DC2626' : '#94A3B8';
+  return (
+    <td className="px-4 py-2.5 text-right relative"
+      onMouseEnter={() => setShow(true)} onMouseLeave={() => setShow(false)}>
+      <span className="font-mono font-semibold cursor-help" style={{ color }}>
+        {sign}{delta.toLocaleString()}
+      </span>
+      {show && (
+        <div className="absolute z-50 right-full top-1/2 -translate-y-1/2 mr-2 w-48 bg-ink text-white text-xs rounded-lg px-3 py-2 shadow-xl pointer-events-none leading-relaxed whitespace-nowrap">
+          <div className="font-semibold mb-1">Gap vs. MEIO Target</div>
+          <div>{sign}{delta.toLocaleString()} units</div>
+          <div>{delta >= 0 ? '+' : '−'}{wkStr} weeks of supply</div>
+          <div className="text-slate-300 text-[10px] mt-1">
+            {delta > 0 ? 'Above target — potential excess' : delta < 0 ? 'Below target — replenishment needed' : 'At target'}
+          </div>
+        </div>
+      )}
+    </td>
+  );
+}
 
 function OptimizationTable({ optimized, highlightedSku }) {
   const [filter, setFilter] = useState('action');
@@ -848,15 +965,15 @@ function OptimizationTable({ optimized, highlightedSku }) {
           <thead>
             <tr className="bg-surface border-b border-border-light text-muted font-semibold">
               {[
-                { label: 'Class', key: 'abcClass' },
-                { label: 'SKU', key: 'id' },
-                { label: 'Product', key: 'name' },
-                { label: 'Decision', key: 'decision' },
-                { label: 'Current SS', key: 'currentSafetyStock' },
-                { label: 'MEIO Target', key: 'meioSafetyStock' },
-                { label: 'Gap (units)', key: 'delta' },
-                { label: 'WC Impact', key: 'wcImpact' },
-                { label: 'Days on Hand', key: 'riskMonths' },
+                { label: 'Class',          key: 'abcClass' },
+                { label: 'SKU',            key: 'id' },
+                { label: 'Product',        key: 'name' },
+                { label: 'Planner Action', key: 'decision' },
+                { label: 'Current SS',     key: 'currentSafetyStock' },
+                { label: 'MEIO Target',    key: 'meioSafetyStock' },
+                { label: 'DoH',            key: 'doh' },
+                { label: 'Gap vs. MEIO Target', key: 'delta' },
+                { label: 'WC Impact',      key: 'wcImpact' },
               ].map(col => (
                 <th key={col.key}
                   onClick={() => toggleSort(col.key)}
@@ -868,17 +985,24 @@ function OptimizationTable({ optimized, highlightedSku }) {
           </thead>
           <tbody>
             {rows.map((s, i) => {
-              const ds = DECISION_STYLE[s.decision];
               const abcColor = ABC_COLORS[s.abcClass] ?? '#94A3B8';
               const isHighlighted = s.id === highlightedSku;
+              const plannerAction = getPlannerAction(s.delta, s.meioSafetyStock);
+              const pas = PLANNER_ACTION_STYLE[plannerAction];
+              // Row color: green if onHand >= MEIO target, amber if below
+              const isAboveTarget = (s.onHand ?? s.currentSafetyStock) >= s.meioSafetyStock;
+              const rowBg = isHighlighted
+                ? '#F0FDFA'
+                : isAboveTarget ? '#F0FDF4' : '#FFFBEB';
               return (
                 <tr
                   key={s.id}
                   ref={el => rowRefs.current[s.id] = el}
-                  className={`border-b border-border-light hover:bg-surface/60 transition-colors ${
-                    isHighlighted ? 'bg-teal-50' : i % 2 === 0 ? '' : 'bg-surface/30'
-                  }`}
-                  style={isHighlighted ? { outline: '2px solid #0F766E', outlineOffset: -2 } : {}}
+                  className="border-b border-border-light hover:brightness-95 transition-all"
+                  style={Object.assign(
+                    { background: rowBg },
+                    isHighlighted ? { outline: '2px solid #0F766E', outlineOffset: -2 } : {}
+                  )}
                 >
                   <td className="px-4 py-2.5">
                     <span className="px-1.5 py-0.5 rounded text-[10px] font-bold" style={{ color: abcColor, background: abcColor + '15', border: `1px solid ${abcColor}30` }}>{s.abcClass}</span>
@@ -886,20 +1010,16 @@ function OptimizationTable({ optimized, highlightedSku }) {
                   <td className="px-4 py-2.5 font-mono font-semibold text-ink">{s.id}</td>
                   <td className="px-4 py-2.5 text-ink">{s.name}</td>
                   <td className="px-4 py-2.5">
-                    <span className="px-2 py-0.5 rounded font-bold text-[11px]" style={{ background: ds.bg, color: ds.text }}>{ds.label}</span>
+                    <span className="px-2 py-0.5 rounded font-bold text-[11px]" style={{ background: pas.bg, color: pas.text }}>{pas.label}</span>
                   </td>
                   <td className="px-4 py-2.5 text-right font-mono text-ink">{s.currentSafetyStock.toLocaleString()}</td>
                   <td className="px-4 py-2.5 text-right font-mono text-muted">{s.meioSafetyStock.toLocaleString()}</td>
-                  <td className={`px-4 py-2.5 text-right font-mono font-semibold ${s.delta > 0 ? 'text-brand' : s.delta < 0 ? 'text-danger' : 'text-muted'}`}>
-                    {s.delta > 0 ? '+' : ''}{s.delta.toLocaleString()}
+                  <td className="px-4 py-2.5 text-right font-mono text-ink">
+                    {s.doh != null && s.doh > 0 ? `${s.doh}d` : <span className="text-faint">—</span>}
                   </td>
+                  <GapCell delta={s.delta} meioSafetyStock={s.meioSafetyStock} avgDailyDemand={s.avgDailyDemand ?? 0} />
                   <td className={`px-4 py-2.5 text-right font-semibold ${s.wcImpact > 0 ? 'text-success' : s.wcImpact < 0 ? 'text-danger' : 'text-muted'}`}>
                     {s.wcImpact > 0 ? '+' : ''}{fmt$(Math.abs(s.wcImpact))}
-                  </td>
-                  <td className="px-4 py-2.5 text-right">
-                    {s.riskMonths > 0
-                      ? <span className="font-bold text-danger">{s.riskMonths}mo</span>
-                      : <span className="text-faint">—</span>}
                   </td>
                 </tr>
               );
@@ -916,9 +1036,10 @@ export default function PlanningView({ skus, scenario, setScenario, ssMultiplier
   const [rerunState, setRerunState] = useState('idle'); // idle | running | done
   const [toast, setToast]           = useState('');
   const [highlightedSku, setHighlightedSku] = useState(null);
+  const [nodeFilter, setNodeFilter]         = useState('all');
   const [lastRun, setLastRun] = useState(() => {
     const d = new Date();
-    d.setDate(d.getDate() - 3); // simulate last run was 3 days ago
+    d.setDate(d.getDate() - 3);
     return d.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
   });
 
@@ -928,7 +1049,24 @@ export default function PlanningView({ skus, scenario, setScenario, ssMultiplier
   const summary    = getPortfolioSummary(simulated);
   const abcSkus    = computeABCClass(skus);
   const abcMap     = Object.fromEntries(abcSkus.map(s => [s.id, s.abcClass]));
-  const optimized  = optimizeInventory(skus, scenario, ssMultipliers).map(s => ({ ...s, abcClass: abcMap[s.id] ?? 'C' }));
+  const skuLookup  = Object.fromEntries(skus.map(k => [k.id, k]));
+
+  // Augment optimized rows with DoH, onHand, and avgDailyDemand for the SKU table
+  const optimized = optimizeInventory(skus, scenario, ssMultipliers).map(s => {
+    const sku = skuLookup[s.id];
+    const avgDailyDemand = sku
+      ? sku.monthlyDemand.reduce((a, b) => a + b, 0) / 12 / 30
+      : 0;
+    const doh = avgDailyDemand > 0 ? Math.round((sku?.onHand ?? 0) / avgDailyDemand) : 0;
+    return {
+      ...s,
+      abcClass: abcMap[s.id] ?? 'C',
+      onHand: sku?.onHand ?? 0,
+      doh,
+      avgDailyDemand,
+    };
+  });
+
   const toReduce   = optimized.filter(s => s.decision === 'REDUCE');
   const toIncrease = optimized.filter(s => s.decision === 'INCREASE');
 
@@ -1003,7 +1141,13 @@ export default function PlanningView({ skus, scenario, setScenario, ssMultiplier
       <ABCLegend />
 
       {/* Model vs Actual scatter charts */}
-      <ModelVsActualCharts skus={skus} optimized={optimized} onHighlight={handleHighlight} />
+      <ModelVsActualCharts
+        skus={skus}
+        optimized={optimized}
+        onHighlight={handleHighlight}
+        nodeFilter={nodeFilter}
+        onNodeFilterChange={setNodeFilter}
+      />
 
       {/* Where to Play + Action list */}
       <div className="col-span-2">
