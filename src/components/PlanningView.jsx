@@ -117,7 +117,7 @@ function MEIOBaseline({ skus, optimized, ssMultipliers }) {
         <div className="flex items-center gap-4 shrink-0">
           <div className="flex gap-4 text-xs">
             <span className="text-muted">Portfolio SS value: <span className="font-semibold text-ink">{fmt$(totalCurrVal)}</span></span>
-            <span className="text-muted">MEIO target: <span className="font-semibold text-brand">{fmt$(totalMEIOVal)}</span></span>
+            <span className="text-muted">MEIO SS target: <span className="font-semibold text-brand">{fmt$(totalMEIOVal)}</span></span>
             {gapVal > 0
               ? <span className="text-danger font-semibold">{fmt$(gapVal)} under-deployed</span>
               : <span className="text-success font-semibold">{fmt$(Math.abs(gapVal))} over-deployed</span>}
