@@ -66,7 +66,7 @@ function InfoTip({ text }) {
 }
 
 // ── MEIO Baseline section ─────────────────────────────────────────────────────
-function MEIOBaseline({ skus, optimized, ssMultipliers }) {
+function MEIOBaseline({ skus, optimized, ssMultipliers, scenario }) {
   const [open, setOpen] = useState(false);
 
   const abcSkusBase  = computeABCClass(skus);
@@ -80,8 +80,9 @@ function MEIOBaseline({ skus, optimized, ssMultipliers }) {
     return { cls, count: group.length, totalMEIO, totalCurrent, belowPct, mult };
   });
 
-  // Inventory value: on-hand at cost vs MEIO target at cost — matches ToplineKPIs
-  const totalMEIOVal  = skus.reduce((s, k) => s + k.meioSafetyStock * k.unitCost, 0);
+  // Inventory value: on-hand at cost vs MEIO target scaled by risk profile
+  const scenAdj       = SCENARIO_KPI_ADJ[scenario] ?? SCENARIO_KPI_ADJ.reactive;
+  const totalMEIOVal  = skus.reduce((s, k) => s + k.meioSafetyStock * k.unitCost, 0) * scenAdj.inv;
   const totalCurrVal  = skus.reduce((s, k) => s + k.onHand * k.unitCost, 0);
   const gapVal        = totalMEIOVal - totalCurrVal;
 
@@ -1185,7 +1186,7 @@ export default function PlanningView({ skus, scenario, setScenario, ssMultiplier
       <ControlBar scenario={scenario} setScenario={setScenario} />
 
       {/* MEIO baseline — collapsible */}
-      <MEIOBaseline skus={skus} optimized={optimized} ssMultipliers={ssMultipliers} />
+      <MEIOBaseline skus={skus} optimized={optimized} ssMultipliers={ssMultipliers} scenario={scenario} />
 
 
       {/* Top-line KPI summary — 6 cards */}
