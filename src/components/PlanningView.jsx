@@ -73,15 +73,16 @@ function MEIOBaseline({ skus, optimized, ssMultipliers }) {
   const abcMapBase   = Object.fromEntries(abcSkusBase.map(s => [s.id, s.abcClass]));
   const tierSummary = ['A','B','C'].map(cls => {
     const group = abcSkusBase.filter(k => k.abcClass === cls);
-    const totalMEIO    = group.reduce((s, k) => s + k.meioSafetyStock * k.unitRevenue, 0);
-    const totalCurrent = group.reduce((s, k) => s + k.currentSafetyStock * k.unitRevenue, 0);
+    const totalMEIO    = group.reduce((s, k) => s + k.meioSafetyStock * k.unitCost, 0);
+    const totalCurrent = group.reduce((s, k) => s + k.onHand * k.unitCost, 0);
     const belowPct     = group.filter(k => k.currentSafetyStock < k.meioSafetyStock).length / (group.length || 1) * 100;
     const mult = typeof ssMultipliers === 'object' ? (ssMultipliers[cls] ?? 1.0) : (ssMultipliers ?? 1.0);
     return { cls, count: group.length, totalMEIO, totalCurrent, belowPct, mult };
   });
 
-  const totalMEIOVal  = skus.reduce((s, k) => s + k.meioSafetyStock * k.unitRevenue, 0);
-  const totalCurrVal  = skus.reduce((s, k) => s + k.currentSafetyStock * k.unitRevenue, 0);
+  // Inventory value: on-hand at cost vs MEIO target at cost — matches ToplineKPIs
+  const totalMEIOVal  = skus.reduce((s, k) => s + k.meioSafetyStock * k.unitCost, 0);
+  const totalCurrVal  = skus.reduce((s, k) => s + k.onHand * k.unitCost, 0);
   const gapVal        = totalMEIOVal - totalCurrVal;
 
   const chartData = [...abcSkusBase]
@@ -116,11 +117,11 @@ function MEIOBaseline({ skus, optimized, ssMultipliers }) {
         </div>
         <div className="flex items-center gap-4 shrink-0">
           <div className="flex gap-4 text-xs">
-            <span className="text-muted">Portfolio SS value: <span className="font-semibold text-ink">{fmt$(totalCurrVal)}</span></span>
-            <span className="text-muted">MEIO SS target: <span className="font-semibold text-brand">{fmt$(totalMEIOVal)}</span></span>
+            <span className="text-muted">Current inventory: <span className="font-semibold text-ink">{fmt$(totalCurrVal)}</span></span>
+            <span className="text-muted">MEIO inventory target: <span className="font-semibold text-brand">{fmt$(totalMEIOVal)}</span></span>
             {gapVal > 0
-              ? <span className="text-danger font-semibold">{fmt$(gapVal)} under-deployed</span>
-              : <span className="text-success font-semibold">{fmt$(Math.abs(gapVal))} over-deployed</span>}
+              ? <span className="text-danger font-semibold">{fmt$(gapVal)} under target</span>
+              : <span className="text-success font-semibold">{fmt$(Math.abs(gapVal))} over target</span>}
           </div>
           {open ? <ChevronUp className="w-4 h-4 text-muted" /> : <ChevronDown className="w-4 h-4 text-muted" />}
         </div>
@@ -168,11 +169,11 @@ function MEIOBaseline({ skus, optimized, ssMultipliers }) {
                       <span className="font-semibold text-ink">{t.count}</span>
                     </div>
                     <div className="flex justify-between">
-                      <span className="text-muted">MEIO SS value</span>
+                      <span className="text-muted">MEIO inv. target</span>
                       <span className="font-semibold text-ink">{fmt$(t.totalMEIO)}</span>
                     </div>
                     <div className="flex justify-between">
-                      <span className="text-muted">Current SS value</span>
+                      <span className="text-muted">Current inventory</span>
                       <span className="font-semibold text-ink">{fmt$(t.totalCurrent)}</span>
                     </div>
                     <div className="flex justify-between">
