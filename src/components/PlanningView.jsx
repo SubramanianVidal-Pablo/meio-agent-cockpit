@@ -32,11 +32,12 @@ const ABC_COLORS  = { A: '#0F766E', B: '#4F46E5', C: '#94A3B8' };
 // ── ABC legend explanation ─────────────────────────────────────────────────────
 function ABCLegend() {
   return (
-    <div className="flex flex-wrap gap-3">
+    <div className="bg-white border border-border-light rounded-xl px-5 py-3 flex flex-col divide-y divide-border-light">
       {Object.entries(ABC_META).map(([cls, m]) => (
-        <div key={cls} className="flex items-start gap-2 px-3 py-2 rounded-lg border text-xs" style={{ background: m.bg, borderColor: m.border }}>
-          <span className="font-black mt-0.5" style={{ color: m.color }}>{m.label}</span>
-          <span className="text-slate-500 leading-relaxed">{m.desc}</span>
+        <div key={cls} className="flex items-center gap-3 py-2.5 first:pt-1 last:pb-1">
+          <span className="shrink-0 w-6 h-6 rounded-md flex items-center justify-center text-xs font-black" style={{ color: m.color, background: m.bg, border: `1px solid ${m.border}` }}>{cls}</span>
+          <span className="font-semibold text-xs text-ink shrink-0 w-40">{m.label}</span>
+          <span className="text-xs text-slate-500">{m.desc}</span>
         </div>
       ))}
     </div>
