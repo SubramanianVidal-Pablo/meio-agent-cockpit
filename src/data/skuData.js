@@ -2,6 +2,7 @@ export const SKU_DATA = [
   // ── Class A — High-revenue biologics ──────────────────────────────────────
   {
     id: 'A-001', name: 'Lumexia mAb', tier: 1, category: 'Oncology',
+    echelon: 'Fill-Finish',
     unitRevenue: 280000, unitCost: 56000, unitMargin: 0.80,
     holdingCostPct: 0.02, leadTimeWeeks: 14, demandCV: 0.28, serviceTarget: 0.995,
     onHand: 420, meioSafetyStock: 380, currentSafetyStock: 290,
@@ -11,6 +12,7 @@ export const SKU_DATA = [
   },
   {
     id: 'A-002', name: 'Velazan Gene Therapy', tier: 1, category: 'Haematology',
+    echelon: 'Fill-Finish',
     unitRevenue: 450000, unitCost: 81000, unitMargin: 0.82,
     holdingCostPct: 0.02, leadTimeWeeks: 20, demandCV: 0.42, serviceTarget: 0.995,
     onHand: 85, meioSafetyStock: 72, currentSafetyStock: 48,
@@ -20,6 +22,7 @@ export const SKU_DATA = [
   },
   {
     id: 'A-003', name: 'Nexovir CAR-T', tier: 1, category: 'Haematology',
+    echelon: 'Distribution',
     unitRevenue: 380000, unitCost: 83600, unitMargin: 0.78,
     holdingCostPct: 0.02, leadTimeWeeks: 6, demandCV: 0.48, serviceTarget: 0.995,
     onHand: 142, meioSafetyStock: 130, currentSafetyStock: 95,
@@ -29,6 +32,7 @@ export const SKU_DATA = [
   },
   {
     id: 'A-004', name: 'Protazen mAb DP', tier: 1, category: 'Oncology',
+    echelon: 'Fill-Finish',
     unitRevenue: 120000, unitCost: 28800, unitMargin: 0.76,
     holdingCostPct: 0.02, leadTimeWeeks: 10, demandCV: 0.22, serviceTarget: 0.995,
     onHand: 680, meioSafetyStock: 590, currentSafetyStock: 510,
@@ -38,6 +42,7 @@ export const SKU_DATA = [
   },
   {
     id: 'A-005', name: 'Carizumab DS', tier: 1, category: 'Oncology',
+    echelon: 'DS Manufacturing',
     unitRevenue: 165000, unitCost: 34650, unitMargin: 0.79,
     holdingCostPct: 0.02, leadTimeWeeks: 12, demandCV: 0.31, serviceTarget: 0.995,
     onHand: 520, meioSafetyStock: 460, currentSafetyStock: 380,
@@ -48,6 +53,7 @@ export const SKU_DATA = [
   // ── Class B — Mid-revenue ─────────────────────────────────────────────────
   {
     id: 'B-001', name: 'Adalix Biosimilar DP', tier: 2, category: 'Immunology',
+    echelon: 'Fill-Finish',
     unitRevenue: 22000, unitCost: 9240, unitMargin: 0.58,
     holdingCostPct: 0.02, leadTimeWeeks: 8, demandCV: 0.18, serviceTarget: 0.98,
     onHand: 2800, meioSafetyStock: 2200, currentSafetyStock: 1900,
@@ -57,6 +63,7 @@ export const SKU_DATA = [
   },
   {
     id: 'B-002', name: 'Ritumax mAb DS', tier: 2, category: 'Oncology',
+    echelon: 'DS Manufacturing',
     unitRevenue: 18000, unitCost: 8100, unitMargin: 0.55,
     holdingCostPct: 0.02, leadTimeWeeks: 10, demandCV: 0.24, serviceTarget: 0.98,
     onHand: 1950, meioSafetyStock: 1600, currentSafetyStock: 1350,
@@ -66,6 +73,7 @@ export const SKU_DATA = [
   },
   {
     id: 'B-003', name: 'Helivex Plasma DS', tier: 2, category: 'Haematology',
+    echelon: 'DS Manufacturing',
     unitRevenue: 95000, unitCost: 23750, unitMargin: 0.75,
     holdingCostPct: 0.02, leadTimeWeeks: 16, demandCV: 0.35, serviceTarget: 0.995,
     onHand: 310, meioSafetyStock: 280, currentSafetyStock: 210,
@@ -76,6 +84,7 @@ export const SKU_DATA = [
   // ── Class C — Lower-revenue ───────────────────────────────────────────────
   {
     id: 'C-001', name: 'Factor VII DP', tier: 3, category: 'Haematology',
+    echelon: 'Distribution',
     unitRevenue: 5800, unitCost: 3364, unitMargin: 0.42,
     holdingCostPct: 0.015, leadTimeWeeks: 10, demandCV: 0.30, serviceTarget: 0.97,
     onHand: 2100, meioSafetyStock: 1750, currentSafetyStock: 1450,
@@ -85,6 +94,7 @@ export const SKU_DATA = [
   },
   {
     id: 'C-002', name: 'Somatropin DS', tier: 3, category: 'Immunology',
+    echelon: 'DS Manufacturing',
     unitRevenue: 3200, unitCost: 1792, unitMargin: 0.44,
     holdingCostPct: 0.015, leadTimeWeeks: 8, demandCV: 0.25, serviceTarget: 0.97,
     onHand: 3800, meioSafetyStock: 3100, currentSafetyStock: 2600,
@@ -93,6 +103,37 @@ export const SKU_DATA = [
     supplier: 'CMO Kappa', coldChain: true, regulatoryStatus: 'Approved',
   },
 ];
+
+// ── Echelon metadata ──────────────────────────────────────────────────────────
+// DS Manufacturing = upstream bulk drug substance (fermentation, cell culture, plasma fractionation)
+// Fill-Finish      = drug product formulation, fill-finish, QC batch release
+// Distribution     = cold-chain 3PL / hospital dispensing / patient-specific (shortest lead times)
+export const ECHELON_META = {
+  'DS Manufacturing': {
+    label: 'DS Manufacturing',
+    sub: 'Upstream · Fermentation, cell culture & plasma fractionation',
+    color: '#0F766E',
+    bg: '#F0FDFA',
+    border: '#5EEAD4',
+    note: 'Longest lead times (8–16 wks) — safety stock driven by batch release and yield variability. Excess carries high write-off risk due to shelf life.',
+  },
+  'Fill-Finish': {
+    label: 'Fill-Finish',
+    sub: 'Drug Product · Formulation, vial filling & final QC release',
+    color: '#4F46E5',
+    bg: '#EEF2FF',
+    border: '#A5B4FC',
+    note: 'Medium lead times (8–20 wks) — targets shaped by fill-finish campaign sizing and GxP batch release windows. CAR-T & gene therapy require patient slot scheduling.',
+  },
+  'Distribution': {
+    label: 'Distribution',
+    sub: 'Cold Chain DC · 3PL, hospital dispensing & patient-specific fulfilment',
+    color: '#D97706',
+    bg: '#FFFBEB',
+    border: '#FCD34D',
+    note: 'Shortest lead times (6–10 wks) — lower DoH targets but cold-chain compliance is non-negotiable. Stockouts here are directly patient-facing.',
+  },
+};
 
 export const TIERS = {
   1: { label: 'Tier 1 — High Margin', color: '#0F766E', bg: '#F0FDFA', border: '#99F6E4' },
