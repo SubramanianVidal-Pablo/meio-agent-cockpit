@@ -210,7 +210,10 @@ export function optimizeInventory(skus, scenario, ssMultiplier) {
     const effectiveOptimal = Math.max(statOptimal, Math.round(policyOptimal * 0.85));
 
     const currentSS = sku.currentSafetyStock;
-    const delta     = currentSS - effectiveOptimal;      // + = overstock, − = understock
+
+    // Anchor decisions and financials to on-hand vs MEIO target (apples-to-apples with UI)
+    const onHand    = sku.onHand;
+    const delta     = onHand - effectiveOptimal;           // + = on-hand above MEIO (overstock), − = below (understock)
     const deltaFrac = effectiveOptimal > 0 ? delta / effectiveOptimal : 0;
 
     // Decision thresholds: >+12 % over → REDUCE, >10 % under → INCREASE, else MAINTAIN
@@ -218,9 +221,9 @@ export function optimizeInventory(skus, scenario, ssMultiplier) {
       deltaFrac >  0.12 ? 'REDUCE'   :
       deltaFrac < -0.10 ? 'INCREASE' : 'MAINTAIN';
 
-    // Financial sizing
-    const wcImpact           =  delta * sku.unitCost;          // +ve = WC release, −ve = WC needed
-    const annualHoldingImpact = Math.abs(delta) * sku.unitCost * sku.holdingCostPct;
+    // Financial sizing: based on on-hand delta vs MEIO target
+    const wcImpact            = -delta * sku.unitCost;    // +ve = WC needed (understock), −ve = WC release (overstock)
+    const annualHoldingImpact =  Math.abs(delta) * sku.unitCost * sku.holdingCostPct;
 
     const riskMonths = sku.timeline.filter(t => t.atRisk).length;
     const urgency =
@@ -233,9 +236,10 @@ export function optimizeInventory(skus, scenario, ssMultiplier) {
       effectiveOptimal,
       policyOptimal,
       currentSS,
-      delta,
+      onHand,
+      delta,          // on-hand minus MEIO target: + = overstock, − = understock
       decision,
-      wcImpact,
+      wcImpact,       // + = WC needed to build up, − = WC releasable
       annualHoldingImpact,
       riskMonths,
       urgency,

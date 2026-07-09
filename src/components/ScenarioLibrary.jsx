@@ -1,68 +1,56 @@
-import { Fragment, useState } from 'react';
+import { Fragment, useState, useMemo } from 'react';
 import {
-  Plus, FolderOpen, Copy, Archive, X, CheckSquare,
+  Plus, FolderOpen, Copy, Archive, Trash2, X, CheckSquare,
   Truck,
   TrendingUp, TrendingDown, Minus,
 } from 'lucide-react';
 import SupplyChainNodeView from './SupplyChainNodeView';
+import { computeVariantKPIs } from './ScenarioWorkspace';
 
-// ─── MEIO plan variant KPIs ───────────────────────────────────────────────────
-// Three plan variants matching the Conservative / Baseline / Optimistic toggle.
-// Mapping to App.jsx internal scenario IDs:
-//   conservative → 'baseline'  (high service level, max SS)
-//   baseline     → 'reactive'  (current MEIO plan targets — default view)
-//   optimistic   → 'proactive' (lean inventory, lower WC, reduced SL)
-const MEIO_VARIANTS = {
-  conservative: {
-    label: 'Conservative Plan',
-    kpis: {
-      inventoryValue: '$162.8M',
-      inventoryTurns: '4.9x',
-      serviceLevel:   '98.5%',
-      ssWeeks:        '8.4 wks',
-      weeksOnHand:    '10.6 wks',
-      stockoutRisk:   '4 SKUs',
-      wcExposure:     '$44.0M',
-      fillRate:       '96.5%',
-    },
-  },
-  baseline: {
-    label: 'Baseline Plan',
-    kpis: {
-      inventoryValue: '$142.4M',
-      inventoryTurns: '5.8x',
-      serviceLevel:   '96.8%',
-      ssWeeks:        '6.2 wks',
-      weeksOnHand:    '8.4 wks',
-      stockoutRisk:   '14 SKUs',
-      wcExposure:     '$38.1M',
-      fillRate:       '94.3%',
-    },
-  },
-  optimistic: {
-    label: 'Optimistic Plan',
-    kpis: {
-      inventoryValue: '$121.6M',
-      inventoryTurns: '7.2x',
-      serviceLevel:   '94.1%',
-      ssWeeks:        '4.6 wks',
-      weeksOnHand:    '6.8 wks',
-      stockoutRisk:   '24 SKUs',
-      wcExposure:     '$32.8M',
-      fillRate:       '91.8%',
-    },
-  },
+// ─── MEIO plan variant metadata ───────────────────────────────────────────────
+// KPIs are computed from real SKU data via computeVariantKPIs — not hardcoded.
+const MEIO_VARIANT_META = {
+  conservative: { label: 'Conservative Plan', ssMult: 1.15 },
+  baseline:     { label: 'Baseline Plan',     ssMult: 1.00 },
+  optimistic:   { label: 'Optimistic Plan',   ssMult: 0.85 },
 };
 
+// ─── KPI rows shown in the comparison table ───────────────────────────────────
+// showAsRange: true → reference column shows optimistic–conservative band
+//              false → single value (baseline midpoint)
 const KPI_ROWS = [
-  { key: 'inventoryValue', label: 'Total Inventory Value',   unit: '$M',   good: 'down' },
-  { key: 'inventoryTurns', label: 'Inventory Turns',         unit: 'x/yr', good: 'up'   },
-  { key: 'serviceLevel',   label: 'Service Level',           unit: '%',    good: 'up'   },
-  { key: 'ssWeeks',        label: 'Safety Stock',            unit: 'wks',  good: 'down' },
-  { key: 'weeksOnHand',    label: 'Weeks of Supply on Hand', unit: 'wks',  good: 'up'   },
-  { key: 'stockoutRisk',   label: 'Stockout Risk',           unit: 'SKUs', good: 'down' },
-  { key: 'wcExposure',     label: 'Working Capital',         unit: '$M',   good: 'down' },
-  { key: 'fillRate',       label: 'Fill Rate',               unit: '%',    good: 'up'   },
+  {
+    key: 'inventoryValue',
+    label: 'Total Inventory Value',
+    unit: '$M',
+    good: 'down',
+    showAsRange: true,
+    definition: null,
+  },
+  {
+    key: 'wcExposure',
+    label: 'Working Capital Impact',
+    unit: '$M',
+    good: 'down',
+    showAsRange: true,
+    definition: 'Estimated working capital tied up in inventory (≈27% of total inventory value, reflecting holding costs, financing, and storage). Lower is better.',
+  },
+  {
+    key: 'stockoutRisk',
+    label: 'Stockout Risk',
+    unit: 'SKUs',
+    good: 'down',
+    showAsRange: false,
+    definition: 'Number of SKUs where current on-hand inventory falls below the MEIO-recommended safety stock target under this scenario. A SKU is flagged when on-hand < (MEIO safety stock × scenario multiplier). Higher safety stock or lower demand variability reduces this count.',
+  },
+  {
+    key: 'serviceLevel',
+    label: 'Projected Service Level',
+    unit: '%',
+    good: 'up',
+    showAsRange: true,
+    definition: 'Projected portfolio fill rate based on MEIO safety stock coverage. Anchored to 97.0% at the baseline safety stock level; adjusts ±0.3pp per week of coverage above or below the reference. Benchmarks: Class A ≥ 98.5% · Class B ≥ 97.0% · Class C ≥ 95.0%.',
+  },
 ];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -129,9 +117,10 @@ function ApplyModal({ scenario, onConfirm, onClose }) {
 
 
 // ─── Scenario Card ────────────────────────────────────────────────────────────
-function ScenarioCard({ scenario, onOpen, onDuplicate, onArchive, onApply }) {
-  const [confirmApply, setConfirmApply] = useState(false);
-  const canApply = (scenario.status === 'active') && !!onApply;
+function ScenarioCard({ scenario, onOpen, onDuplicate, onArchive, onDelete, onApply }) {
+  const [confirmApply,  setConfirmApply]  = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const canApply  = (scenario.status === 'active') && !!onApply;
   const isApplied = scenario.status === 'applied';
 
   return (
@@ -140,7 +129,12 @@ function ScenarioCard({ scenario, onOpen, onDuplicate, onArchive, onApply }) {
       <div>
         <div className="flex items-start justify-between gap-2 mb-1">
           <p className="text-sm font-semibold text-slate-800 leading-tight line-clamp-1">{scenario.name}</p>
-          <StatusBadge status={scenario.status} />
+          <div className="flex items-center gap-1.5 shrink-0">
+            {scenario.pinned && (
+              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-indigo-100 text-indigo-600">Demo</span>
+            )}
+            <StatusBadge status={scenario.status} />
+          </div>
         </div>
         {scenario.description ? (
           <p className="text-xs text-slate-400 line-clamp-2 leading-relaxed">{scenario.description}</p>
@@ -158,12 +152,13 @@ function ScenarioCard({ scenario, onOpen, onDuplicate, onArchive, onApply }) {
 
       {/* KPI tiles */}
       {scenario.kpis ? (
-        <div className="grid grid-cols-3 gap-1.5">
+        <div className="grid grid-cols-2 gap-1.5">
           {[
-            { label: 'Inv Value',    value: scenario.kpis.inventoryValue },
-            { label: 'Service Lvl', value: scenario.kpis.serviceLevel   },
-            { label: 'WC Used',     value: scenario.kpis.wcExposure     },
-          ].map(({ label, value }) => (
+            { label: 'Inv Value',   value: scenario.kpis.inventoryValue },
+            { label: 'WC Impact',   value: scenario.kpis.wcExposure     },
+            { label: 'Svc Level',   value: scenario.kpis.serviceLevel   },
+            { label: 'Stockout',    value: scenario.kpis.stockoutRisk   },
+          ].filter(t => t.value).map(({ label, value }) => (
             <div key={label} className="bg-teal-50 rounded-lg px-2 py-1.5 text-center">
               <p className="text-[9px] text-teal-500 font-medium leading-none mb-0.5">{label}</p>
               <p className="text-xs font-bold text-teal-800">{value}</p>
@@ -171,7 +166,7 @@ function ScenarioCard({ scenario, onOpen, onDuplicate, onArchive, onApply }) {
           ))}
         </div>
       ) : (
-        <p className="text-xs text-slate-300 italic">No results yet</p>
+        <p className="text-xs text-slate-300 italic">Save scenario to see KPI impact</p>
       )}
 
       {/* Action buttons */}
@@ -196,7 +191,7 @@ function ScenarioCard({ scenario, onOpen, onDuplicate, onArchive, onApply }) {
         >
           <Copy size={15} />
         </button>
-        {scenario.status !== 'archived' && scenario.status !== 'applied' && (
+        {!scenario.pinned && scenario.status !== 'archived' && scenario.status !== 'applied' && (
           <button
             onClick={() => onArchive(scenario.id)}
             title="Archive"
@@ -205,7 +200,38 @@ function ScenarioCard({ scenario, onOpen, onDuplicate, onArchive, onApply }) {
             <Archive size={15} />
           </button>
         )}
+        {!scenario.pinned && (
+          <button
+            onClick={() => setConfirmDelete(true)}
+            title="Delete"
+            className="p-1.5 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 transition-colors"
+          >
+            <Trash2 size={15} />
+          </button>
+        )}
       </div>
+
+      {/* Delete confirmation */}
+      {confirmDelete && (
+        <div className="bg-red-50 border border-red-200 rounded-xl p-3 flex flex-col gap-2">
+          <p className="text-xs font-semibold text-red-800">Delete this scenario?</p>
+          <p className="text-[10px] text-red-600">This cannot be undone.</p>
+          <div className="flex gap-2">
+            <button
+              onClick={() => { onDelete(scenario.id); setConfirmDelete(false); }}
+              className="flex-1 text-xs font-bold py-1.5 rounded-lg bg-red-600 text-white hover:bg-red-700 transition-colors"
+            >
+              Delete
+            </button>
+            <button
+              onClick={() => setConfirmDelete(false)}
+              className="flex-1 text-xs font-medium py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 transition-colors"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Apply to Plan */}
       {(canApply || isApplied) && (
@@ -248,55 +274,68 @@ function AddCard({ onClick }) {
 }
 
 // ─── Comparison Table ─────────────────────────────────────────────────────────
-// Always visible at the bottom of the library. Baseline pinned left.
-// Toggle switches the reference variant (Conservative / Baseline / Optimistic).
-// Each KPI row has a value row + Δ vs. reference row beneath it.
-function ComparisonTable({ scenarios }) {
-  const [meioVariant, setMeioVariant] = useState('baseline'); // session-local; not persisted
+function ComparisonTable({ scenarios, skus }) {
+  // Compute all three MEIO variants to build the range
+  const allVariants = useMemo(() => {
+    if (!skus?.length) return null;
+    return Object.fromEntries(
+      Object.entries(MEIO_VARIANT_META).map(([key, meta]) => [
+        key, computeVariantKPIs(skus, meta.ssMult),
+      ])
+    );
+  }, [skus]);
 
-  const activeVariant = MEIO_VARIANTS[meioVariant];
-  const referenceKPIs = activeVariant.kpis;
+  const baselineKPIs     = allVariants?.baseline     ?? {};
+  const optimisticKPIs   = allVariants?.optimistic   ?? {};
+  const conservativeKPIs = allVariants?.conservative ?? {};
 
-  // All scenarios with KPIs, sorted oldest → newest (id = Date.now() string)
+  // Scenarios with KPIs sorted oldest → newest
+  // Show all non-archived scenarios; pinned demo sorts to front
   const compared = scenarios
-    .filter(s => s.kpis)
-    .sort((a, b) => Number(a.id) - Number(b.id));
+    .filter(s => s.status !== 'archived')
+    .sort((a, b) => {
+      if (a.pinned && !b.pinned) return -1;
+      if (!a.pinned && b.pinned) return 1;
+      return Number(a.id) - Number(b.id);
+    });
 
   const hasScenarios = compared.length > 0;
 
+  // Format the reference cell: range (low – high) or single value
+  function refCell(key, showAsRange) {
+    if (!allVariants) return '—';
+    const base = baselineKPIs[key];
+    if (!showAsRange) return base ?? '—';
+
+    const lo = optimisticKPIs[key];
+    const hi = conservativeKPIs[key];
+    if (!lo || !hi) return base ?? '—';
+
+    // Strip trailing units for display — keep just numbers + symbol
+    const fmt = v => v; // already formatted strings like "$122.3M" or "97.0%"
+    return (
+      <div className="flex flex-col items-center gap-0.5">
+        <span className="text-xs font-bold text-slate-700">{fmt(lo)}</span>
+        <span className="text-[9px] text-slate-400 leading-none">to</span>
+        <span className="text-xs font-bold text-slate-700">{fmt(hi)}</span>
+      </div>
+    );
+  }
+
+  // For Δ comparison we always diff against baseline midpoint
+  function getBaseNum(key) { return parseNumeric(baselineKPIs[key]); }
+
   return (
     <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
-      {/* Table header + variant toggle */}
+      {/* Header */}
       <div className="px-5 py-4 border-b border-slate-100">
-        <div className="flex items-start justify-between gap-4 flex-wrap">
-          <div>
-            <p className="text-sm font-semibold text-slate-800">Baseline Plan vs. Scenarios</p>
-            <p className="text-xs text-slate-400 mt-0.5">
-              {hasScenarios
-                ? 'Green = better than reference · Red = worse · Δ row shows % change'
-                : 'Save a scenario to compare against the plan'}
-            </p>
-          </div>
-
-          {/* MEIO Plan variant toggle */}
-          <div className="flex items-center gap-2 shrink-0">
-            <span className="text-xs font-semibold text-slate-500">MEIO Plan</span>
-            <div className="flex gap-1 p-0.5 bg-slate-100 rounded-lg">
-              {Object.entries(MEIO_VARIANTS).map(([key]) => (
-                <button
-                  key={key}
-                  onClick={() => setMeioVariant(key)}
-                  className={`px-3 py-1 text-xs font-semibold rounded-md transition-colors capitalize ${
-                    meioVariant === key
-                      ? 'bg-white text-teal-700 shadow-sm'
-                      : 'text-slate-500 hover:text-slate-700'
-                  }`}
-                >
-                  {key}
-                </button>
-              ))}
-            </div>
-          </div>
+        <div>
+          <p className="text-sm font-semibold text-slate-800">MEIO Target Ranges vs. Scenarios</p>
+          <p className="text-xs text-slate-400 mt-0.5">
+            {hasScenarios
+              ? 'MEIO range = optimistic to conservative targets · Green = better than baseline · Red = worse'
+              : 'Save a scenario to compare against the MEIO target range'}
+          </p>
         </div>
       </div>
 
@@ -304,28 +343,23 @@ function ComparisonTable({ scenarios }) {
         <table className="text-sm w-full">
           <thead>
             <tr className="border-b border-slate-200 bg-slate-50">
-              <th className="text-left text-xs font-semibold text-slate-500 py-3 px-4 sticky left-0 bg-slate-50 z-10 w-52">
+              <th className="text-left text-xs font-semibold text-slate-500 py-3 px-4 sticky left-0 bg-slate-50 z-10 w-56">
                 KPI
               </th>
-              {/* Reference column — label updates with selected variant */}
-              <th className="text-center py-3 px-6 whitespace-nowrap bg-slate-50 border-r border-slate-200">
+              <th className="text-center py-3 px-6 bg-slate-50 border-r border-slate-200" style={{ minWidth: 140 }}>
                 <div className="flex flex-col items-center gap-0.5">
-                  <span className="text-[10px] font-bold text-slate-400 tracking-widest uppercase">Reference</span>
-                  <span className="text-xs font-semibold text-slate-700">{activeVariant.label}</span>
-                  <span className="text-[10px] text-slate-400 capitalize">{meioVariant} targets</span>
+                  <span className="text-[10px] font-bold text-slate-400 tracking-widest uppercase">MEIO Target Range</span>
+                  <span className="text-[10px] text-slate-400">Optimistic → Conservative</span>
                 </div>
               </th>
-              {/* One column per saved scenario */}
               {compared.map(s => (
-                <th key={s.id} className="text-center py-3 px-6 whitespace-nowrap">
+                <th key={s.id} className="text-center py-3 px-6 whitespace-nowrap" style={{ minWidth: 140 }}>
                   <div className="flex flex-col items-center gap-0.5">
                     <span className="text-[10px] font-bold text-teal-500 tracking-widest uppercase">Scenario</span>
                     <span className="text-xs font-semibold text-teal-800 max-w-[160px] truncate block">{s.name}</span>
                     <span className="text-[10px] text-slate-400">{s.updatedAt}</span>
                     {s.status === 'applied' && (
-                      <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-purple-100 text-purple-700 mt-0.5">
-                        ✓ Applied
-                      </span>
+                      <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-purple-100 text-purple-700 mt-0.5">✓ Applied</span>
                     )}
                   </div>
                 </th>
@@ -335,21 +369,30 @@ function ComparisonTable({ scenarios }) {
           </thead>
 
           <tbody>
-            {KPI_ROWS.map(({ key, label, unit, good }, rowIdx) => {
-              const baseVal = referenceKPIs[key];
-              const baseNum = parseNumeric(baseVal);
+            {KPI_ROWS.map(({ key, label, unit, good, showAsRange, definition }, rowIdx) => {
+              const baseNum = getBaseNum(key);
               const rowBg   = rowIdx % 2 === 0 ? 'bg-white' : 'bg-slate-50/50';
 
               return (
                 <Fragment key={key}>
                   {/* Value row */}
                   <tr className={rowBg}>
-                    <td className={`py-2.5 px-4 text-xs font-semibold text-slate-700 whitespace-nowrap sticky left-0 z-10 ${rowBg}`}>
-                      {label}
-                      <span className="ml-1 text-[10px] font-normal text-slate-400">({unit})</span>
+                    <td className={`py-2.5 px-4 text-xs font-semibold text-slate-700 sticky left-0 z-10 ${rowBg}`}>
+                      <div className="flex flex-col gap-0.5">
+                        <div className="flex items-center gap-1.5 whitespace-nowrap">
+                          {label}
+                          <span className="text-[10px] font-normal text-slate-400">({unit})</span>
+                        </div>
+                        {definition && (
+                          <p className="text-[10px] font-normal text-slate-400 leading-snug max-w-[220px] whitespace-normal">
+                            {definition}
+                          </p>
+                        )}
+                      </div>
                     </td>
-                    <td className="py-2.5 px-6 text-center text-xs font-bold text-slate-600 whitespace-nowrap border-r border-slate-100">
-                      {baseVal}
+                    {/* MEIO range / single value */}
+                    <td className="py-2.5 px-6 text-center border-r border-slate-100">
+                      {refCell(key, showAsRange)}
                     </td>
                     {compared.map(s => {
                       const val  = s.kpis?.[key];
@@ -369,14 +412,14 @@ function ComparisonTable({ scenarios }) {
                     {!hasScenarios && <td />}
                   </tr>
 
-                  {/* Δ vs. reference row */}
+                  {/* Δ vs. MEIO baseline row */}
                   <tr className={`${rowBg} border-b border-slate-100`}>
                     <td className={`pb-2.5 pt-0 px-4 sticky left-0 z-10 ${rowBg}`}>
-                      <span className="text-[10px] text-slate-400 italic pl-0.5">Δ vs. reference</span>
+                      <span className="text-[10px] text-slate-400 italic pl-0.5">Δ vs. MEIO baseline</span>
                     </td>
                     <td className="pb-2.5 pt-0 px-6 text-center border-r border-slate-100">
                       <span className="inline-flex items-center gap-0.5 text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-400">
-                        <Minus size={9} /> —
+                        <Minus size={9} /> reference
                       </span>
                     </td>
                     {compared.map(s => {
@@ -391,8 +434,7 @@ function ComparisonTable({ scenarios }) {
                       const pct     = baseNum !== 0 ? (diff / Math.abs(baseNum)) * 100 : 0;
                       const neutral = Math.abs(diff) < 0.001;
                       const better  = !neutral && ((good === 'up' && diff > 0) || (good === 'down' && diff < 0));
-                      const cls     = neutral
-                        ? 'bg-slate-100 text-slate-500'
+                      const cls     = neutral ? 'bg-slate-100 text-slate-500'
                         : better ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-600';
                       return (
                         <td key={s.id} className="pb-2.5 pt-0 px-6 text-center">
@@ -426,7 +468,7 @@ function ComparisonTable({ scenarios }) {
 }
 
 // ─── Main component ───────────────────────────────────────────────────────────
-export default function ScenarioLibrary({ scenarios, onNew, onOpen, onDuplicate, onUpdate, onApply }) {
+export default function ScenarioLibrary({ scenarios, skus = [], onNew, onOpen, onDuplicate, onDelete, onUpdate, onApply }) {
   const [scModal, setScModal] = useState(null);
 
   function handleOpen(id, mode) {
@@ -468,6 +510,7 @@ export default function ScenarioLibrary({ scenarios, onNew, onOpen, onDuplicate,
               onOpen={handleOpen}
               onDuplicate={onDuplicate}
               onArchive={handleArchive}
+              onDelete={onDelete}
               onUpdate={onUpdate}
               onApply={onApply}
             />
@@ -489,7 +532,7 @@ export default function ScenarioLibrary({ scenarios, onNew, onOpen, onDuplicate,
       )}
 
       {/* Comparison table — always visible at the bottom */}
-      <ComparisonTable scenarios={scenarios} />
+      <ComparisonTable scenarios={scenarios} skus={skus} />
 
       {/* Supply chain node view */}
       {scModalScenario && (

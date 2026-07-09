@@ -1,16 +1,18 @@
 import { useState } from 'react';
-import { Target, Activity, LayoutDashboard, ClipboardList, CheckCircle2, XCircle, Clock, AlertCircle } from 'lucide-react';
-import PlanningView from './components/PlanningView';
-import SimulationChat from './components/SimulationChat';
+import { Target, Activity, LayoutDashboard, ClipboardList, CheckCircle2, XCircle, Clock, AlertCircle, Lightbulb } from 'lucide-react';
+import PlanningView, { CIAgentPanel } from './components/PlanningView';
+import SimulationChat, { DEMO_SCENARIO } from './components/SimulationChat';
 import ChatBot from './components/ChatBot';
 import OperationsDashboard from './components/OperationsDashboard';
-import { SKU_DATA } from './data/skuData';
+import { SKU_DATA, computeABCClass } from './data/skuData';
+import { optimizeInventory } from './data/simulationEngine';
 
 const TABS = [
-  { id: 'plan',     label: 'Inventory Plan',    icon: Target,          sub: 'What to do this cycle' },
-  { id: 'simulate', label: 'Scenario Planning',  icon: Activity,        sub: 'What-if scenarios' },
-  { id: 'ops',      label: 'Ops Review',         icon: LayoutDashboard, sub: 'Portfolio health' },
-  { id: 'log',      label: 'Decision Log',        icon: ClipboardList,   sub: 'Signal decisions' },
+  { id: 'plan',     label: 'Inventory Plan',             icon: Target,          sub: 'What to do this cycle' },
+  { id: 'ci',       label: 'Continuous Improvement',     icon: Lightbulb,       sub: 'Optimisation opportunities' },
+  { id: 'simulate', label: 'Scenario Planning',           icon: Activity,        sub: 'What-if scenarios' },
+  { id: 'ops',      label: 'Ops Review',                  icon: LayoutDashboard, sub: 'Portfolio health' },
+  { id: 'log',      label: 'Decision Log',                icon: ClipboardList,   sub: 'Signal decisions' },
 ];
 
 // ── Open item resolution controls ─────────────────────────────────────────────
@@ -205,7 +207,14 @@ export default function App() {
   const [ssMultipliers, setSsMultipliers] = useState({ 1: 1.0, 2: 1.0, 3: 1.0, 4: 1.0 });
   const [decisions, setDecisions]         = useState([]);
   // Scenarios live here so they persist across tab switches
-  const [scenarios, setScenarios]         = useState([]);
+  const [scenarios, setScenarios]         = useState([DEMO_SCENARIO]);
+  // rowStates lifted here so Inventory Plan and Ops Review stay in sync
+  // shape: { [skuId]: 'accepted' | 'deferred' }
+  const [rowStates, setRowStates]         = useState({});
+
+  function handleRowStateChange(skuId, state) {
+    setRowStates(prev => ({ ...prev, [skuId]: state }));
+  }
 
   function handleDecision(entry) {
     const id = `${Date.now()}-${Math.random()}`;
@@ -313,12 +322,6 @@ export default function App() {
               </div>
             </div>
 
-            {/* Scenario context pill — scenario label only, no per-tier SS multipliers */}
-            <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-surface border border-border-light text-xs">
-              <span className="text-muted">Risk Profile:</span>
-              <span className="font-semibold text-ink">{SCENARIO_LABELS[scenario] ?? scenario}</span>
-            </div>
-
             {/* Tab Nav */}
             <nav className="flex gap-0.5 flex-1 justify-end">
               {TABS.map(t => {
@@ -361,8 +364,27 @@ export default function App() {
       <main>
         <div className="max-w-screen-xl mx-auto px-6 py-6">
           {activeTab === 'plan' && (
-            <PlanningView skus={SKU_DATA} {...sharedCtx} onDecision={handleDecision} />
+            <PlanningView skus={SKU_DATA} {...sharedCtx} onDecision={handleDecision}
+              rowStates={rowStates} onRowStateChange={handleRowStateChange} />
           )}
+          {activeTab === 'ci' && (() => {
+            const abcMap = Object.fromEntries(computeABCClass(SKU_DATA).map(s => [s.id, s.abcClass]));
+            const skuLookup = Object.fromEntries(SKU_DATA.map(k => [k.id, k]));
+            const optimized = optimizeInventory(SKU_DATA, scenario, ssMultipliers).map(s => ({
+              ...s,
+              abcClass: abcMap[s.id] ?? 'C',
+              onHand: skuLookup[s.id]?.onHand ?? 0,
+            }));
+            return (
+              <div className="space-y-4 fade-in">
+                <div>
+                  <h1 className="text-base font-bold text-ink">Continuous Improvement Opportunities</h1>
+                  <p className="text-xs text-muted mt-1">AI-identified structural improvements to inventory policy, sourcing, and supply chain design.</p>
+                </div>
+                <CIAgentPanel skus={SKU_DATA} optimized={optimized} />
+              </div>
+            );
+          })()}
           {activeTab === 'simulate' && (
             <SimulationChat skus={SKU_DATA} onDecision={handleDecision} scenarios={scenarios} onScenariosChange={setScenarios} onApply={handleApply} />
           )}
@@ -373,6 +395,9 @@ export default function App() {
               scenarios={scenarios}
               decisions={decisions}
               onRevertToBaseline={handleRevertToBaseline}
+              rowStates={rowStates}
+              onRowStateChange={handleRowStateChange}
+              onDecision={handleDecision}
             />
           )}
           {activeTab === 'log' && (
