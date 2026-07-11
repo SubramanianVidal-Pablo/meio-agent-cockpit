@@ -21,7 +21,7 @@ const SKU_MASTER = [
   // ── ONCOLOGY ──────────────────────────────────────────────────────────────
   { id: 'ONK-001', name: 'Lumexia IV',     bu: 'Oncology',    regions: ['North America', 'Europe'],
     abcClass: 'Class A', ipcStatus: 'below',   otif: 92.4, otifTarget: 98.5,
-    woc: 2.1, daysToBreach: 14, stockoutProb: 82, stockoutAtRisk: 3.2e6,
+    woc: 2.1, daysToBreach: 14, stockoutProb: 82, stockoutAtRisk: 6.8e6,
     eoWriteOff: 1.8e6, eoRecoverable: 2.4e6, invValue: 18.4e6,
     stockoutRec: 'Expedite CMO batch — airfreight to avoid breach' },
   { id: 'ONK-002', name: 'Protazen Oral',  bu: 'Oncology',    regions: ['North America', 'Latin America'],
@@ -37,8 +37,8 @@ const SKU_MASTER = [
   // ── IMMUNOLOGY ────────────────────────────────────────────────────────────
   { id: 'IMM-001', name: 'Velazan Sub',    bu: 'Immunology',  regions: ['Europe', 'Asia Pacific'],
     abcClass: 'Class A', ipcStatus: 'in-band', otif: 96.1, otifTarget: 98.5,
-    woc: 3.4, daysToBreach: 24, stockoutProb: 61, stockoutAtRisk: 2.8e6,
-    eoWriteOff: 0.4e6, eoRecoverable: 5.2e6, invValue: 22.6e6,
+    woc: 3.4, daysToBreach: 24, stockoutProb: 61, stockoutAtRisk: 4.5e6,
+    eoWriteOff: 0.4e6, eoRecoverable: 2.2e6, invValue: 22.6e6,
     stockoutRec: 'Increase WH transfer from EU hub by 2 wks supply' },
   { id: 'IMM-002', name: 'Immurel IV',     bu: 'Immunology',  regions: ['North America', 'Europe'],
     abcClass: 'Class A', ipcStatus: 'in-band', otif: 97.4, otifTarget: 98.5,
@@ -47,7 +47,7 @@ const SKU_MASTER = [
     stockoutRec: null },
   { id: 'IMM-003', name: 'Prostakin Tabs', bu: 'Immunology',  regions: ['Asia Pacific', 'Latin America'],
     abcClass: 'Class B', ipcStatus: 'in-band', otif: 88.4, otifTarget: 97.0,
-    woc: 1.4, daysToBreach: 10, stockoutProb: 88, stockoutAtRisk: 1.9e6,
+    woc: 1.4, daysToBreach: 10, stockoutProb: 88, stockoutAtRisk: 3.4e6,
     eoWriteOff: 0,     eoRecoverable: 1.8e6, invValue: 8.2e6,
     stockoutRec: 'Trigger emergency reserve — demand surge ongoing' },
   // ── NEUROLOGY ─────────────────────────────────────────────────────────────
@@ -63,13 +63,13 @@ const SKU_MASTER = [
     stockoutRec: null },
   { id: 'NEU-003', name: 'Synaptex Caps',  bu: 'Neurology',   regions: ['Latin America', 'Asia Pacific'],
     abcClass: 'Class C', ipcStatus: 'in-band', otif: 93.2, otifTarget: 95.0,
-    woc: 3.8, daysToBreach: 27, stockoutProb: 52, stockoutAtRisk: 0.6e6,
+    woc: 3.8, daysToBreach: 27, stockoutProb: 52, stockoutAtRisk: 1.0e6,
     eoWriteOff: 0,     eoRecoverable: 0,     invValue: 2.8e6,
     stockoutRec: 'Review demand plan before committing replenishment' },
   // ── RARE DISEASE ──────────────────────────────────────────────────────────
   { id: 'RAR-001', name: 'Helivex Plasma', bu: 'Rare Disease', regions: ['North America', 'Europe', 'Asia Pacific'],
     abcClass: 'Class A', ipcStatus: 'in-band', otif: 93.8, otifTarget: 98.5,
-    woc: 1.8, daysToBreach: 12, stockoutProb: 91, stockoutAtRisk: 1.9e6,
+    woc: 1.8, daysToBreach: 12, stockoutProb: 91, stockoutAtRisk: 14.5e6,
     eoWriteOff: 1.2e6, eoRecoverable: 0.8e6, invValue: 14.2e6,
     stockoutRec: 'Trigger emergency reserve — patient criticality HIGH' },
   { id: 'RAR-002', name: 'Factor VII',     bu: 'Rare Disease', regions: ['North America', 'Europe'],
@@ -105,7 +105,7 @@ const DECISIONS_DATA = [
     id: 'd1', bu: 'Oncology', regions: ['North America', 'Europe'], priority: 'red',
     tag: 'Supply Allocation', due: 'Due Thu 10 Jul',
     issue: 'Insufficient supply to cover all markets for ONK-001 (Lumexia IV) — allocation decision required for Q3 batch',
-    revenueAtRisk: 18.4e6, patientsAtRisk: 340, skusAffected: 1, marketsAffected: 5,
+    revenueAtRisk: 6.8e6, patientsAtRisk: 340, skusAffected: 1, marketsAffected: 5,
     agentRec: 'Prioritise NA and EU based on patient criticality and contract obligations; accept 14% shortfall in remaining markets.',
     ctaLabel: 'View Allocation Scenarios',
     deepDive: {
@@ -116,7 +116,7 @@ const DECISIONS_DATA = [
         {
           label: 'Option A — Prioritise NA + EU (Recommended)',
           outcome: 'NA and EU-West fully covered. 14% shortfall accepted across EU-East, APAC, LATAM.',
-          revenueProtected: '$16.7M (91%)',
+          revenueProtected: '$6.2M (91%)',
           serviceLevel: '98.5% in priority markets',
           risk: 'Low — absorption markets retain 6+ wks cover',
           tradeoff: 'APAC distributor may escalate; LATAM misses Q3 launch window by ~3 weeks.',
@@ -124,7 +124,7 @@ const DECISIONS_DATA = [
         {
           label: 'Option B — Even distribution across all 5 markets',
           outcome: 'All markets receive 86% of requested volume. No market fully covered.',
-          revenueProtected: '$15.8M (86%)',
+          revenueProtected: '$5.8M (86%)',
           serviceLevel: '86% across portfolio',
           risk: 'Medium — breaches NA contract SLA; regulatory risk in EU-West.',
           tradeoff: 'Avoids distributor escalation short-term but triggers penalty clauses in NA and EU contracts.',
@@ -144,18 +144,18 @@ const DECISIONS_DATA = [
     id: 'd2', bu: 'Rare Disease', regions: ['North America'], priority: 'amber',
     tag: 'Budget Authorization', due: 'Due Mon 14 Jul',
     issue: 'Safety stock build for RAR-001 (Helivex Plasma) ahead of CMO-3 shutdown exceeds NWC budget by $12M — order deadline in 6 days',
-    revenueAtRisk: 31.0e6, patientsAtRisk: null, skusAffected: 2, marketsAffected: 4,
-    agentRec: 'Approve $12M incremental inventory build by 14 Jul to maintain 97% service level — cost of inaction: $31M revenue at risk.',
+    revenueAtRisk: 14.5e6, patientsAtRisk: null, skusAffected: 2, marketsAffected: 4,
+    agentRec: 'Approve $12M incremental inventory build by 14 Jul to maintain 97% service level — cost of inaction: $14.5M revenue at risk.',
     ctaLabel: 'View Build Plan',
     deepDive: {
       title: 'RAR-001 (Helivex Plasma) — CMO-3 Shutdown Safety Stock Build Plan',
       description: `CMO-3 (primary manufacturer for Helivex Plasma) enters a planned 14-week GMP maintenance shutdown on 28 July. Current on-hand inventory of 4.8 weeks of cover is insufficient to bridge the shutdown period without stockouts across NA, EU, APAC, and LATAM. The MEIO model recommends a pre-build to 18.6 weeks of cover requiring $12M incremental NWC above the approved budget. Purchase order must be placed by 14 July to meet CMO fill slot deadline.`,
-      reasoning: `Helivex Plasma serves a rare bleeding disorder patient population with no therapeutic substitute. A stockout carries direct patient safety risk and will trigger regulatory notifications in NA and EU. The $12M working capital cost compares favourably against $31M in revenue at risk and potential penalty payments under patient-access commitments. The build plan is structured in two tranches to allow partial approval if full budget cannot be released in one cycle.`,
+      reasoning: `Helivex Plasma serves a rare bleeding disorder patient population with no therapeutic substitute. A stockout carries direct patient safety risk and will trigger regulatory notifications in NA and EU. The $12M working capital cost compares favourably against $14.5M in revenue at risk and potential penalty payments under patient-access commitments. The build plan is structured in two tranches to allow partial approval if full budget cannot be released in one cycle.`,
       options: [
         {
           label: 'Option A — Full build: 18.6 weeks cover (Recommended)',
           outcome: 'Full bridge through CMO-3 shutdown with 2-week safety buffer.',
-          revenueProtected: '$31.0M (100%)',
+          revenueProtected: '$14.5M (100%)',
           serviceLevel: '97.0% across all markets',
           risk: 'Low — full patient continuity maintained',
           tradeoff: '$12M incremental NWC; cash released post-restart in Q4. Opportunity cost vs. alternative deployment.',
@@ -163,7 +163,7 @@ const DECISIONS_DATA = [
         {
           label: 'Option B — Partial build: 14 weeks cover',
           outcome: 'Covers shutdown period with zero buffer. No safety margin.',
-          revenueProtected: '$23.1M (75%)',
+          revenueProtected: '$10.9M (75%)',
           serviceLevel: '92.4% — below Class A floor of 97%',
           risk: 'Medium-High — any demand spike or CMO restart delay triggers immediate stockout.',
           tradeoff: '$6M NWC outlay; saves $6M cash but materially raises patient safety exposure.',
@@ -174,7 +174,7 @@ const DECISIONS_DATA = [
           revenueProtected: '$0 (markets go on allocation)',
           serviceLevel: '<80% during shutdown period',
           risk: 'Very High — patient safety events, regulatory escalation, contract penalties.',
-          tradeoff: 'Saves $12M NWC but incurs $31M+ revenue impact and reputational cost that far exceeds savings.',
+          tradeoff: 'Saves $12M NWC but incurs $14.5M+ revenue impact and reputational cost that far exceeds savings.',
         },
       ],
     },
@@ -183,18 +183,18 @@ const DECISIONS_DATA = [
     id: 'd3', bu: 'Immunology', regions: ['Asia Pacific', 'Latin America'], priority: 'red',
     tag: 'Supply Allocation', due: 'Due Wed 9 Jul',
     issue: 'IMM-003 (Prostakin Tabs) stockout imminent in APAC — 10 days coverage remaining, no replenishment scheduled',
-    revenueAtRisk: 8.2e6, patientsAtRisk: 180, skusAffected: 1, marketsAffected: 3,
-    agentRec: 'Expedite air freight from EU hub — adds $0.4M freight cost vs $8.2M revenue impact avoided.',
+    revenueAtRisk: 3.4e6, patientsAtRisk: 180, skusAffected: 1, marketsAffected: 3,
+    agentRec: 'Expedite air freight from EU hub — adds $0.4M freight cost vs $3.4M revenue impact avoided.',
     ctaLabel: 'View Expedite Options',
     deepDive: {
       title: 'IMM-003 (Prostakin Tabs) — APAC Stockout Expedite Analysis',
       description: `Prostakin Tabs APAC inventory stands at 1.4 weeks of cover (10 days) following an unplanned demand surge of +32% vs. forecast in Korea and Australia. Standard sea freight replenishment from the EU hub takes 24–28 days. No scheduled replenishment order is in place. Without intervention, stockout will occur by 18 July across 3 APAC markets (Korea, Australia, Singapore), affecting 180 patients on active therapy. An emergency expedite decision is required before 9 July to meet minimum logistics lead times.`,
-      reasoning: `Air freight from the EU hub (Amsterdam) is the only option that arrives within the 10-day window. The EU hub holds 8.4 weeks of cover — releasing 4 weeks to APAC does not endanger EU supply continuity. The $0.4M air freight premium is 4.9% of the $8.2M revenue at risk, representing a straightforward cost-benefit case. Partial expedite covers the immediate breach but requires a follow-on sea freight order to rebuild APAC cover to policy levels.`,
+      reasoning: `Air freight from the EU hub (Amsterdam) is the only option that arrives within the 10-day window. The EU hub holds 8.4 weeks of cover — releasing 4 weeks to APAC does not endanger EU supply continuity. The $0.4M air freight premium is 11.8% of the $3.4M revenue at risk, representing a straightforward cost-benefit case. Partial expedite covers the immediate breach but requires a follow-on sea freight order to rebuild APAC cover to policy levels.`,
       options: [
         {
           label: 'Option A — Full air freight expedite from EU hub (Recommended)',
           outcome: '4 weeks of APAC supply airfreighted. ETA: 7 days. Stockout avoided.',
-          revenueProtected: '$8.2M (100%)',
+          revenueProtected: '$3.4M (100%)',
           serviceLevel: '97.8% maintained across APAC markets',
           risk: 'Low — EU hub remains at 4.4 wks cover, above Class B floor.',
           tradeoff: '$0.4M freight premium; follow-on sea freight order needed to rebuild EU buffer within 6 weeks.',
@@ -202,10 +202,10 @@ const DECISIONS_DATA = [
         {
           label: 'Option B — Partial air freight (2 weeks supply)',
           outcome: 'Korea and Australia covered. Singapore goes on allocation for 12 days.',
-          revenueProtected: '$5.9M (72%)',
+          revenueProtected: '$2.4M (72%)',
           serviceLevel: '88% — below Class B floor',
           risk: 'Medium — Singapore stockout still occurs; distributor penalty likely.',
-          tradeoff: '$0.2M freight premium. Saves $0.2M vs Option A but leaves $2.3M revenue and 40 patients uncovered.',
+          tradeoff: '$0.2M freight premium. Saves $0.2M vs Option A but leaves $1.0M revenue and 40 patients uncovered.',
         },
         {
           label: 'Option C — Wait for scheduled sea freight',
@@ -213,7 +213,7 @@ const DECISIONS_DATA = [
           revenueProtected: '$0',
           serviceLevel: '<70% for 3 APAC markets during gap period',
           risk: 'Very High — 180 patients without therapy; distributor escalation; regulatory notification required.',
-          tradeoff: 'Saves $0.4M freight cost but incurs $8.2M revenue loss, patient safety risk, and market confidence damage.',
+          tradeoff: 'Saves $0.4M freight cost but incurs $3.4M revenue loss, patient safety risk, and market confidence damage.',
         },
       ],
     },
@@ -503,8 +503,7 @@ function OTIFCard({ otif }) {
   const delta = otif.current - otif.prior;
   return (
     <Card className="flex flex-col gap-2">
-      <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide">OTIF</div>
-      <div className="text-[10px] text-slate-400">% orders fulfilled on time and in full</div>
+      <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide">OTIF <span className="normal-case font-normal text-slate-400">— On Time In Full</span></div>
       <div className="flex items-end gap-3 mt-1">
         <div className="text-4xl font-black" style={{ color: RAG[otif.rag].text }}>{otif.current}%</div>
         <div className="mb-1 flex flex-col gap-0.5">
@@ -610,8 +609,14 @@ function EOCard({ data }) {
       {data.length === 0 ? <EmptyState label="no E&O in this filter" /> : (
         <>
           <div className="flex items-center gap-4 text-[10px] text-slate-500">
-            <div className="flex items-center gap-1.5"><span style={{ width: 10, height: 10, background: '#EF4444', borderRadius: 2, display: 'inline-block' }} />Write-off risk (expiry &lt;30d)</div>
-            <div className="flex items-center gap-1.5"><span style={{ width: 10, height: 10, background: '#FCD34D', borderRadius: 2, display: 'inline-block' }} />Recoverable excess</div>
+            <div className="flex flex-col gap-0.5">
+              <div className="flex items-center gap-1.5"><span style={{ width: 10, height: 10, background: '#EF4444', borderRadius: 2, display: 'inline-block' }} /><span className="font-semibold">Write-off risk</span></div>
+              <div className="text-slate-400 pl-4">Stock expiring within 30 days with no viable redeployment — likely to be written off.</div>
+            </div>
+            <div className="flex flex-col gap-0.5">
+              <div className="flex items-center gap-1.5"><span style={{ width: 10, height: 10, background: '#FCD34D', borderRadius: 2, display: 'inline-block' }} /><span className="font-semibold">Recoverable excess</span></div>
+              <div className="text-slate-400 pl-4">Above-target stock that can be redeployed or returned before expiry — not yet a write-off.</div>
+            </div>
           </div>
           <div className="flex flex-col gap-2">
             {data.map(d => (

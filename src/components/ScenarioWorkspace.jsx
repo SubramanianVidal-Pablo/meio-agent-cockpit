@@ -106,10 +106,49 @@ export function computeScenarioKPIs(skus, params = {}) {
 export const mockKPIs = computeScenarioKPIs;
 
 /* ─────────────────────────────────────────────────────────────────────────────
-   SYSTEM PROMPT
+   SYSTEM PROMPT — built dynamically from live SKU configuration
 ───────────────────────────────────────────────────────────────────────────── */
 
-const SYSTEM_PROMPT = `You are a supply chain planning agent specializing in multi-echelon inventory optimization (MEIO) for biopharma networks. Your role is to help planners respond to supply chain disruptions and capacity constraints.
+const SERVICE_TARGETS = { A: 99.5, B: 98.0, C: 95.0 };
+
+function buildSystemPrompt(skus) {
+  // Compute baseline KPIs from live SKU data
+  const baseline = skus?.length ? computeVariantKPIs(skus) : null;
+  const enriched = skus?.length ? computeABCClass(skus) : [];
+
+  // Build per-SKU context block
+  const skuLines = enriched.map(s => {
+    const avgWeeklyDemand = (s.monthlyDemand.reduce((a, b) => a + b, 0) / 12) * 12 / 52;
+    const ssWeeks = avgWeeklyDemand > 0 ? (s.meioSafetyStock / avgWeeklyDemand).toFixed(1) : 'n/a';
+    const onHandWeeks = avgWeeklyDemand > 0 ? (s.onHand / avgWeeklyDemand).toFixed(1) : 'n/a';
+    const invValueM = (s.meioSafetyStock * s.unitCost / 1e6).toFixed(1);
+    const floor = SERVICE_TARGETS[s.abcClass];
+    return `  ${s.id} — ${s.name}
+    Class: ${s.abcClass} | Service target: ${floor}% | Unit cost: $${s.unitCost.toLocaleString()}
+    Safety stock: ${s.meioSafetyStock.toLocaleString()} units (${ssWeeks} wks) | On-hand: ${s.onHand.toLocaleString()} units (${onHandWeeks} wks)
+    Lead time: ${s.leadTimeWeeks} wks | Demand CV: ${s.demandCV?.toFixed(2) ?? 'n/a'} | SS value: $${invValueM}M`;
+  }).join('\n\n');
+
+  const portfolioBlock = baseline ? `
+CURRENT PORTFOLIO BASELINE (live, as of today)
+  Total inventory value:  ${baseline.inventoryValue}
+  WC exposure:            ${baseline.wcExposure}
+  Avg weeks on hand:      ${baseline.weeksOnHand}
+  Inventory turns:        ${baseline.inventoryTurns}
+  SKUs at stockout risk:  ${baseline.stockoutRisk}
+  Projected service level: ${baseline.serviceLevel}
+` : '';
+
+  return `You are a supply chain planning agent specializing in multi-echelon inventory optimization (MEIO) for biopharma networks. Your role is to help planners respond to supply chain disruptions and capacity constraints.
+
+${portfolioBlock}
+SERVICE LEVEL POLICY FLOORS (must not be breached without explicit approval)
+  Class A SKUs: ${SERVICE_TARGETS.A}% (oncology, rare disease — no substitutes)
+  Class B SKUs: ${SERVICE_TARGETS.B}% (immunology, established biologics)
+  Class C SKUs: ${SERVICE_TARGETS.C}% (neurology, lower acuity)
+
+SKU MASTER — CURRENT CONFIGURATION
+${skuLines || '  (No SKU data available)'}
 
 When a user describes a situation, always:
 1. Confirm your understanding of the situation briefly
@@ -148,11 +187,13 @@ ALTERNATIVE APPROACHES
 
 Key principles:
 - Always recommend first — never ask the user what they want to optimize before giving your view
-- Always reference Class A/B/C service floors when assessing service level risk
-- Always show net working capital impact
+- Always reference Class A/B/C service floors when assessing service level risk (floors: A=${SERVICE_TARGETS.A}%, B=${SERVICE_TARGETS.B}%, C=${SERVICE_TARGETS.C}%)
+- Always show net working capital impact; reference the baseline WC exposure above
 - Always show whether each product stays within or outside its policy floor
+- Use real safety stock weeks, on-hand weeks, and unit costs from the SKU master above when calculating impacts
 - Be concise. Use supply chain terminology naturally. No padding.
 - For follow-up questions, pushback, or "what if" variants — maintain full context from the conversation and update the trade-off analysis as needed. You do not need to repeat the full structured format for short follow-up answers, but always be quantitative.`;
+}
 
 /* ─────────────────────────────────────────────────────────────────────────────
    MESSAGE RENDERER
@@ -390,7 +431,12 @@ function UserMessage({ content }) {
    KPI EXTRACTION PROMPT
    Sent as a final user turn at save time. Claude returns JSON only.
 ───────────────────────────────────────────────────────────────────────────── */
-const KPI_EXTRACTION_PROMPT = `Based on the supply chain scenario conversation above, estimate the portfolio-level KPI impact if the recommended course of action is implemented.
+function buildKpiExtractionPrompt(skus) {
+  const baseline = skus?.length ? computeVariantKPIs(skus) : null;
+  const invVal  = baseline?.inventoryValue ?? '$122.3M';
+  const wcExp   = baseline?.wcExposure     ?? '$33.0M';
+  const sl      = baseline?.serviceLevel   ?? '97.0%';
+  return `Based on the supply chain scenario conversation above, estimate the portfolio-level KPI impact if the recommended course of action is implemented.
 
 Return ONLY valid JSON — no markdown, no explanation, just the JSON object:
 {
@@ -401,14 +447,15 @@ Return ONLY valid JSON — no markdown, no explanation, just the JSON object:
 }
 
 Rules:
-- inventoryValue: total portfolio inventory value post-recommendation (reference baseline: $122.3M)
-- wcExposure: working capital tied up in inventory post-recommendation (reference baseline: $33.0M; typically ~27% of inventory value)
+- inventoryValue: total portfolio inventory value post-recommendation (reference baseline: ${invVal})
+- wcExposure: working capital tied up in inventory post-recommendation (reference baseline: ${wcExp}; typically ~27% of inventory value)
 - stockoutRisk: number of SKUs at elevated stockout risk after the recommendation is applied (reference baseline: 0 SKUs)
-- serviceLevel: projected portfolio fill rate post-recommendation (reference baseline: 97.0%)
+- serviceLevel: projected portfolio fill rate post-recommendation (reference baseline: ${sl})
 - Use the specific numbers from the TRADE-OFFS section to calculate realistic deltas from the baseline
 - If the conversation shows no completed recommendation yet, return baseline values`;
+}
 
-export default function ScenarioWorkspace({ scenario, onSave, onBack, onUpdate }) {
+export default function ScenarioWorkspace({ scenario, skus, onSave, onBack, onUpdate }) {
   const [input, setInput]           = useState('');
   const [loading, setLoading]       = useState(false);
   const [saving, setSaving]         = useState(false);  // KPI extraction in progress
@@ -452,7 +499,7 @@ export default function ScenarioWorkspace({ scenario, onSave, onBack, onUpdate }
 
       await callClaudeChat(
         apiMessages,
-        SYSTEM_PROMPT,
+        buildSystemPrompt(skus),
         (chunk) => {
           assistantContent += chunk;
           onUpdate({ chatHistory: [...newHistory, { role: 'assistant', content: assistantContent }] });
@@ -489,7 +536,7 @@ export default function ScenarioWorkspace({ scenario, onSave, onBack, onUpdate }
         // Build the API messages: full chat history + extraction request as final user turn
         const apiMessages = [
           ...chatHistory.map(m => ({ role: m.role, content: m.content })),
-          { role: 'user', content: KPI_EXTRACTION_PROMPT },
+          { role: 'user', content: buildKpiExtractionPrompt(skus) },
         ];
 
         let raw = '';

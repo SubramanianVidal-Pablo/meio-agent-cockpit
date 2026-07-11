@@ -5,7 +5,7 @@ import {
 } from 'lucide-react';
 import {
   BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
-  ResponsiveContainer, Cell, ReferenceLine,
+  ResponsiveContainer, Cell, ReferenceLine, ReferenceArea,
   ScatterChart, Scatter, ZAxis, Legend,
 } from 'recharts';
 import { runSimulation, getPortfolioSummary, optimizeInventory, SCENARIO_SS_MULT } from '../data/simulationEngine';
@@ -38,7 +38,7 @@ function ABCLegend() {
 }
 
 // Decision colors — distinct from tier colors to avoid confusion
-const DECISION_COLOR_MAP = { INCREASE: '#B45309', REDUCE: '#1D4ED8', MAINTAIN: '#166534' };
+const DECISION_COLOR_MAP = { INCREASE: '#B45309', REDUCE: '#1D4ED8' };
 
 const SCENARIOS = [
   { id: 'baseline', label: 'Conservative', sub: 'Higher safety stock, risk-averse' },
@@ -148,7 +148,7 @@ function MEIOBaseline({ skus, optimized, ssMultipliers, scenario }) {
         onHand: k.onHand ?? k.currentSafetyStock,
         rangeMin, rangeBand: rangeMax - rangeMin,
         rangeMax,
-        decision: opt?.decision ?? 'MAINTAIN',
+        decision: opt?.decision ?? 'INCREASE',
       };
     });
 
@@ -172,19 +172,6 @@ function MEIOBaseline({ skus, optimized, ssMultipliers, scenario }) {
           </div>
         </div>
         <div className="flex items-center gap-4 shrink-0">
-          <div className="flex gap-4 text-xs">
-            <span className="text-muted">Current inventory: <span className="font-semibold text-ink">{fmt$(totalCurrVal)}</span></span>
-            <span className="text-muted">MEIO range: <span className="font-semibold text-brand">{fmt$(totalMEIOVal * MEIO_RANGE_MIN_MULT)} – {fmt$(totalMEIOVal * MEIO_RANGE_MAX_MULT)}</span></span>
-            {(() => {
-              const rangeMin = totalMEIOVal * MEIO_RANGE_MIN_MULT;
-              const rangeMax = totalMEIOVal * MEIO_RANGE_MAX_MULT;
-              if (totalCurrVal > rangeMax)
-                return <span className="text-warning font-semibold">{fmt$(totalCurrVal - rangeMax)} above range</span>;
-              if (totalCurrVal < rangeMin)
-                return <span className="text-danger font-semibold">{fmt$(rangeMin - totalCurrVal)} below range</span>;
-              return <span className="text-success font-semibold">within MEIO range</span>;
-            })()}
-          </div>
           {open ? <ChevronUp className="w-4 h-4 text-muted" /> : <ChevronDown className="w-4 h-4 text-muted" />}
         </div>
       </button>
@@ -199,7 +186,7 @@ function MEIOBaseline({ skus, optimized, ssMultipliers, scenario }) {
               <span className="font-mono bg-white border border-border-light px-1 rounded">SS = Z × σ_demand × √lead-time</span>{' '}
               where Z is determined by the service target (e.g. Class A = 99.5% → Z = 2.58).
               Higher demand variability (CV) and longer lead times both increase the required buffer.
-              The decisions — REDUCE, MAINTAIN, INCREASE — compare your <em>current</em> safety
+              The decisions — REDUCE, INCREASE — compare your <em>current</em> safety
               stock against these MEIO-derived targets, adjusted by your class multipliers.
             </div>
           </div>
@@ -643,17 +630,27 @@ function ImpactSummaryBar({ allPoints }) {
 
   const buildRows = () => {
     // Post-change = MEIO target for ALL SKUs (consistent with Portfolio Totals MEIO Model Output)
+    const SL_TARGETS = { A: 99.5, B: 98.0, C: 95.0 };
+    const calcSL = (actualQty, meioQty, target) => {
+      const ratio = meioQty > 0 ? actualQty / meioQty : 1;
+      return ratio >= 1 ? target : target * Math.pow(ratio, 0.3);
+    };
+
     if (groupBy === 'class') {
       return ['A', 'B', 'C'].map(cls => {
         const group = allPoints.filter(p => p.abcClass === cls);
+        const target = SL_TARGETS[cls] ?? 95;
         const currentInv   = group.reduce((s, p) => s + p.invValue, 0);
         const currentInTgt = group.filter(p => p.actualQty >= p.meioQty * MEIO_RANGE_MIN_MULT && p.actualQty <= p.meioQty * MEIO_RANGE_MAX_MULT).length;
         const newInv = group.reduce((s, p) => {
           const unitCost = p.actualQty > 0 ? p.invValue / p.actualQty : 0;
           return s + p.meioQty * unitCost;
         }, 0);
-        const newInTgt = group.length; // at MEIO target, every SKU is by definition in range
-        return { label: `Class ${cls}`, color: ABC_COLORS[cls], total: group.length, currentInv, newInv, wcDelta: newInv - currentInv, currentInTgt, newInTgt, decision: null };
+        const newInTgt = group.length;
+        const totalVal = group.reduce((s, p) => s + p.invValue, 0) || 1;
+        const currentSL = group.reduce((s, p) => s + calcSL(p.actualQty, p.meioQty, target) * p.invValue, 0) / totalVal;
+        const targetSL  = target;
+        return { label: `Class ${cls}`, color: ABC_COLORS[cls], total: group.length, currentInv, newInv, wcDelta: newInv - currentInv, currentInTgt, newInTgt, currentSL, targetSL, decision: null };
       });
     }
     return [...allPoints]
@@ -662,7 +659,9 @@ function ImpactSummaryBar({ allPoints }) {
         const unitCost = p.actualQty > 0 ? p.invValue / p.actualQty : 0;
         const newInv   = p.meioQty * unitCost;
         const currentInTgt = (p.actualQty >= p.meioQty * MEIO_RANGE_MIN_MULT && p.actualQty <= p.meioQty * MEIO_RANGE_MAX_MULT) ? 1 : 0;
-        return { label: `#${i + 1} ${p.id}`, sublabel: p.name, color: DECISION_COLOR_MAP[p.decision] ?? '#94A3B8', total: 1, currentInv: p.invValue, newInv, wcDelta: newInv - p.invValue, currentInTgt, newInTgt: 1, decision: p.decision };
+        const target = SL_TARGETS[p.abcClass] ?? 95;
+        const currentSL = calcSL(p.actualQty, p.meioQty, target);
+        return { label: `#${i + 1} ${p.id}`, sublabel: p.name, color: DECISION_COLOR_MAP[p.decision] ?? '#94A3B8', total: 1, currentInv: p.invValue, newInv, wcDelta: newInv - p.invValue, currentInTgt, newInTgt: 1, currentSL, targetSL: target, decision: p.decision };
       });
   };
 
@@ -705,7 +704,7 @@ function ImpactSummaryBar({ allPoints }) {
           <thead>
             <tr className="bg-indigo-50/60 border-b border-indigo-100 text-indigo-700">
               <th className="text-left px-4 py-2 text-[10px] font-semibold uppercase tracking-wide">{groupBy === 'class' ? 'Class' : 'SKU'}</th>
-              {groupBy === 'rank' && <th className="text-left px-4 py-2 text-[10px] font-semibold uppercase tracking-wide">Decision</th>}
+              {groupBy === 'rank' && <th className="text-left px-4 py-2 text-[10px] font-semibold uppercase tracking-wide">Suggested Action</th>}
               <th className="text-right px-4 py-2 leading-tight">
                 <div className="text-[10px] font-semibold uppercase tracking-wide">Current inv. value</div>
                 <div className="text-[9px] font-normal text-indigo-400 normal-case tracking-normal">actual on-hand × unit cost today</div>
@@ -719,8 +718,8 @@ function ImpactSummaryBar({ allPoints }) {
                 <div className="text-[9px] font-normal text-indigo-400 normal-case tracking-normal">post-change minus current inv. value</div>
               </th>
               <th className="text-right px-4 py-2 leading-tight">
-                <div className="text-[10px] font-semibold uppercase tracking-wide">SKUs in MEIO range</div>
-                <div className="text-[9px] font-normal text-indigo-400 normal-case tracking-normal">on-hand within −20% / +30% of MEIO target</div>
+                <div className="text-[10px] font-semibold uppercase tracking-wide">Service level impact</div>
+                <div className="text-[9px] font-normal text-indigo-400 normal-case tracking-normal">current → post-MEIO target</div>
               </th>
             </tr>
           </thead>
@@ -745,10 +744,12 @@ function ImpactSummaryBar({ allPoints }) {
                   {fmtDelta(r.wcDelta)}
                 </td>
                 <td className="px-4 py-2.5 text-right">
-                  <span className="font-semibold text-ink">{r.newInTgt}</span>
-                  <span className="text-slate-400"> / {r.total}</span>
-                  {r.newInTgt > r.currentInTgt && <span className="ml-1 text-[10px] text-green-600 font-semibold">↑{r.newInTgt - r.currentInTgt}</span>}
-                  {r.newInTgt < r.currentInTgt && <span className="ml-1 text-[10px] text-red-500 font-semibold">↓{r.currentInTgt - r.newInTgt}</span>}
+                  <span className="text-slate-500">{r.currentSL?.toFixed(1)}%</span>
+                  <span className="text-slate-400 mx-1">→</span>
+                  <span className="font-semibold text-teal-700">{r.targetSL?.toFixed(1)}%</span>
+                  {r.targetSL > r.currentSL && (
+                    <span className="ml-1 text-[10px] text-teal-600 font-semibold">+{(r.targetSL - r.currentSL).toFixed(1)}pp</span>
+                  )}
                 </td>
               </tr>
             ))}
@@ -761,10 +762,7 @@ function ImpactSummaryBar({ allPoints }) {
               <td className="px-4 py-2.5 text-right font-bold font-mono" style={{ color: totalWcDelta <= 0 ? '#0F766E' : '#DC2626' }}>
                 {fmtDelta(totalWcDelta)}
               </td>
-              <td className="px-4 py-2.5 text-right">
-                {totalNewInTgt} / {totalSkus}
-                {totalNewInTgt > totalCurrentInTgt && <span className="ml-1 text-[10px] text-green-600">↑{totalNewInTgt - totalCurrentInTgt}</span>}
-              </td>
+              <td className="px-4 py-2.5 text-right text-[11px] text-indigo-700">—</td>
             </tr>
           </tfoot>
         </table>
@@ -800,7 +798,9 @@ function InventoryAnalysis({ skus, optimized, onDecision, rowStates, onRowStateC
     const meioInvValue = sku.meioSafetyStock   * sku.unitCost;
     const dotSize      = Math.max(6, Math.min(20, Math.sqrt(invValue / 50000)));
     const opt          = optimized.find(o => o.id === sku.id);
-    const decision     = opt?.decision ?? 'MAINTAIN';
+    // Derive decision from actual vs MEIO so it matches the scatter chart position
+    const ratio = sku.meioSafetyStock > 0 ? sku.onHand / sku.meioSafetyStock : 1;
+    const decision = ratio > 1.00 ? 'REDUCE' : 'INCREASE';
     return {
       id: sku.id, name: sku.name, abcClass: sku.abcClass,
       echelon:      sku.echelon ?? 'Fill-Finish',
@@ -848,11 +848,9 @@ function InventoryAnalysis({ skus, optimized, onDecision, rowStates, onRowStateC
   // ── Summary stats ─────────────────────────────────────────────────────────────
   const decPts  = visibleWithVals.filter(p => p.decision === 'REDUCE');
   const incPts  = visibleWithVals.filter(p => p.decision === 'INCREASE');
-  const mntPts  = visibleWithVals.filter(p => p.decision === 'MAINTAIN');
   const total   = visiblePoints.length || 1;
   const decPct  = Math.round(decPts.length / total * 100);
-  const incPct  = Math.round(incPts.length / total * 100);
-  const mntPct  = 100 - decPct - incPct;
+  const incPct  = 100 - decPct;
   const totalActual  = visibleWithVals.reduce((s, p) => s + p.actual, 0);
   const totalModel   = visibleWithVals.reduce((s, p) => s + p.model,  0);
   // Full-portfolio gap: all SKUs above/below MEIO median, regardless of decision
@@ -897,7 +895,7 @@ function InventoryAnalysis({ skus, optimized, onDecision, rowStates, onRowStateC
   }
 
   // ── Scatter data ──────────────────────────────────────────────────────────────
-  const decisionGroups = ['REDUCE','MAINTAIN','INCREASE'].map(dec => ({
+  const decisionGroups = ['REDUCE','INCREASE'].map(dec => ({
     decision: dec,
     color: DECISION_COLOR_MAP[dec],
     label: dec === 'REDUCE' ? 'Decrease' : dec === 'INCREASE' ? 'Increase' : 'Maintain',
@@ -906,7 +904,9 @@ function InventoryAnalysis({ skus, optimized, onDecision, rowStates, onRowStateC
 
   const axisMax = (() => {
     const mx = Math.max(...visibleWithVals.flatMap(p => [p.model, p.actual]), 1);
-    return Math.ceil(mx * 1.12);
+    const padded = mx * 1.12;
+    const unit = padded >= 1e6 ? 5e6 : padded >= 1e3 ? 5e3 : 5;
+    return Math.ceil(padded / unit) * unit;
   })();
 
   // ── Table rows ────────────────────────────────────────────────────────────────
@@ -965,9 +965,9 @@ function InventoryAnalysis({ skus, optimized, onDecision, rowStates, onRowStateC
 
               <div className="border-t border-border-light" />
 
-              {/* Decision */}
-              <IAFilterSection title="Decision">
-                {['REDUCE','MAINTAIN','INCREASE'].map(dec => (
+              {/* Suggested Action */}
+              <IAFilterSection title="Suggested Action">
+                {['REDUCE','INCREASE'].map(dec => (
                   <IACheckbox key={dec}
                     checked={!excDecisions.has(dec)}
                     onChange={() => toggleExclude(setExcDecisions, dec)}
@@ -1068,20 +1068,16 @@ function InventoryAnalysis({ skus, optimized, onDecision, rowStates, onRowStateC
           <div className="flex-1 min-w-0 flex flex-col">
 
             {/* Summary strip */}
-            <div className="px-5 py-3 border-b border-border-light bg-slate-50 grid grid-cols-3 gap-6">
+            <div className={`px-5 py-3 border-b border-border-light bg-slate-50 grid gap-6 ${metricType === 'doh' ? 'grid-cols-1' : 'grid-cols-3'}`}>
 
               {/* 1 — Count bar */}
               <div>
-                <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">SKU Count by Model Decision</div>
-                <div className="text-[9px] text-slate-400 mb-2">how many SKUs the model recommends to increase, maintain, or reduce</div>
+                <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">SKU Count by Suggested Action</div>
+                <div className="text-[9px] text-slate-400 mb-2">how many SKUs the model recommends to increase or reduce</div>
                 <div className="flex rounded-full overflow-hidden h-5 w-full">
                   <div className="flex items-center justify-center text-[10px] font-bold text-white"
                     style={{ width: `${decPct}%`, background: DECISION_COLOR_MAP.REDUCE }}>
                     {decPct > 12 && `${decPct}%`}
-                  </div>
-                  <div className="flex items-center justify-center text-[10px] font-bold text-white bg-slate-300"
-                    style={{ width: `${mntPct}%` }}>
-                    {mntPct > 12 && `${mntPct}%`}
                   </div>
                   <div className="flex items-center justify-center text-[10px] font-bold text-white"
                     style={{ width: `${incPct}%`, background: DECISION_COLOR_MAP.INCREASE }}>
@@ -1090,65 +1086,68 @@ function InventoryAnalysis({ skus, optimized, onDecision, rowStates, onRowStateC
                 </div>
                 <div className="flex justify-between mt-1.5 text-[10px] font-semibold">
                   <span style={{ color: DECISION_COLOR_MAP.REDUCE }}>↓ {decPts.length} decrease</span>
-                  <span className="text-slate-400">{mntPts.length} maintain</span>
                   <span style={{ color: DECISION_COLOR_MAP.INCREASE }}>↑ {incPts.length} increase</span>
                 </div>
               </div>
 
-              {/* 2 — Metric bars */}
-              <div>
-                <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">{axisLabel} — Gap to MEIO Median</div>
-                <div className="text-[9px] text-slate-400 mb-2">all SKUs · how far above or below the MEIO recommended level the portfolio sits today</div>
-                {[
-                  { label: 'Above MEIO median', sub: 'on-hand exceeds MEIO target', val: aboveSum, color: DECISION_COLOR_MAP.REDUCE },
-                  { label: 'Below MEIO median', sub: 'on-hand below MEIO target',   val: belowSum, color: DECISION_COLOR_MAP.INCREASE },
-                ].map(({ label, sub, val, color }) => (
-                  <div key={label} className="mb-2">
-                    <div className="flex justify-between text-[10px] mb-0.5">
-                      <span style={{ color }} className="font-semibold">{label}</span>
-                      <span className="font-semibold text-slate-700">{fmtV(val)}</span>
-                    </div>
-                    <div className="text-[9px] text-slate-400 mb-0.5">{sub}</div>
-                    <div className="h-4 bg-slate-100 rounded-sm overflow-hidden">
-                      <div className="h-full rounded-sm" style={{ width: `${(val / maxBar * 100).toFixed(1)}%`, background: color, opacity: 0.72 }} />
-                    </div>
-                  </div>
-                ))}
-              </div>
-
-              {/* 3 — Metric totals */}
-              <div>
-                <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">{axisLabel} — Portfolio Totals</div>
-                <div className="text-[9px] text-slate-400 mb-2">sum across all visible SKUs at current on-hand vs. MEIO recommended</div>
-                <div className="space-y-1.5">
+              {/* 2 — Metric bars (hidden for DoH) */}
+              {metricType !== 'doh' && (
+                <div>
+                  <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">{axisLabel} — Gap to MEIO Median</div>
+                  <div className="text-[9px] text-slate-400 mb-2">all SKUs · how far above or below the MEIO recommended level the portfolio sits today</div>
                   {[
-                    { label: `Current on-hand (${axisLabel.toLowerCase()})`, value: totalActual, color: '#475569' },
-                    { label: 'MEIO Model Output',   value: totalModel,  color: '#4F46E5' },
-                    { label: 'Model Suggest Change',value: totalChange,
-                      color: totalChange <= 0 ? DECISION_COLOR_MAP.REDUCE : DECISION_COLOR_MAP.INCREASE,
-                      signed: true },
-                  ].map(row => (
-                    <div key={row.label} className="flex items-center justify-between gap-2">
-                      <span className="text-[10px] text-slate-500">{row.label}</span>
-                      <span className="text-xs font-bold tabular-nums" style={{ color: row.color }}>
-                        {row.signed ? fmtSigned(row.value) : fmtV(row.value)}
-                      </span>
+                    { label: 'Above MEIO median', sub: 'on-hand exceeds MEIO target', val: aboveSum, color: DECISION_COLOR_MAP.REDUCE },
+                    { label: 'Below MEIO median', sub: 'on-hand below MEIO target',   val: belowSum, color: DECISION_COLOR_MAP.INCREASE },
+                  ].map(({ label, sub, val, color }) => (
+                    <div key={label} className="mb-2">
+                      <div className="flex justify-between text-[10px] mb-0.5">
+                        <span style={{ color }} className="font-semibold">{label}</span>
+                        <span className="font-semibold text-slate-700">{fmtV(val)}</span>
+                      </div>
+                      <div className="text-[9px] text-slate-400 mb-0.5">{sub}</div>
+                      <div className="h-4 bg-slate-100 rounded-sm overflow-hidden">
+                        <div className="h-full rounded-sm" style={{ width: `${(val / maxBar * 100).toFixed(1)}%`, background: color, opacity: 0.72 }} />
+                      </div>
                     </div>
                   ))}
                 </div>
-              </div>
+              )}
+
+              {/* 3 — Metric totals (hidden for DoH) */}
+              {metricType !== 'doh' && (
+                <div>
+                  <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">{axisLabel} — Portfolio Totals</div>
+                  <div className="text-[9px] text-slate-400 mb-2">sum across all visible SKUs at current on-hand vs. MEIO recommended</div>
+                  <div className="space-y-1.5">
+                    {[
+                      { label: `Current on-hand (${axisLabel.toLowerCase()})`, value: totalActual, color: '#475569' },
+                      { label: 'MEIO Model Output',    value: totalModel,  color: '#4F46E5' },
+                      { label: 'Model Suggest Change', value: totalChange,
+                        color: totalChange <= 0 ? DECISION_COLOR_MAP.REDUCE : DECISION_COLOR_MAP.INCREASE,
+                        signed: true },
+                    ].map(row => (
+                      <div key={row.label} className="flex items-center justify-between gap-2">
+                        <span className="text-[10px] text-slate-500">{row.label}</span>
+                        <span className="text-xs font-bold tabular-nums" style={{ color: row.color }}>
+                          {row.signed ? fmtSigned(row.value) : fmtV(row.value)}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
             </div>
 
             {/* Scatter */}
             <div className="px-5 pt-4 pb-2">
-              <div className="flex items-center justify-between mb-2">
-                <div>
+              <div className="flex flex-wrap items-start justify-between gap-y-1 mb-2">
+                <div className="min-w-0">
                   <div className="text-sm font-semibold text-ink">
                     Model vs Actual — {axisLabel}
                     <span className="ml-1 text-[10px] font-normal text-slate-400">Colored by model suggested change</span>
                   </div>
-                  <div className="text-xs text-muted mt-0.5 flex items-center gap-2 flex-nowrap whitespace-nowrap">
+                  <div className="text-xs text-muted mt-0.5 flex flex-wrap items-center gap-2">
                     <svg width="18" height="6" viewBox="0 0 18 6" className="shrink-0"><line x1="0" y1="3" x2="18" y2="3" stroke="#94A3B8" strokeWidth="1.5" strokeDasharray="4 3"/></svg>
                     <span>Diagonal = median MEIO output</span>
                     <span className="text-slate-300">·</span>
@@ -1158,13 +1157,13 @@ function InventoryAnalysis({ skus, optimized, onDecision, rowStates, onRowStateC
                   </div>
                 </div>
                 <div className="flex items-center gap-4 text-[11px] shrink-0">
-                  {Object.entries({ REDUCE: 'Decrease', MAINTAIN: 'Maintain', INCREASE: 'Increase' }).map(([dec, lbl]) => (
+                  {Object.entries({ REDUCE: 'Decrease', INCREASE: 'Increase' }).map(([dec, lbl]) => (
                     <span key={dec} className="flex items-center gap-1.5">
                       <span className="w-2.5 h-2.5 rounded-full" style={{ background: DECISION_COLOR_MAP[dec], opacity: 0.85 }} />
                       <span className="text-slate-500">{lbl}</span>
                     </span>
                   ))}
-                  <span className="border-l border-slate-200 pl-4 flex items-center gap-2 text-slate-400">
+                  <span className="border-l border-slate-200 pl-4 flex items-center gap-2 text-slate-400 whitespace-nowrap">
                     <svg width="32" height="14" viewBox="0 0 32 14">
                       <circle cx="5"  cy="7" r="3"  fill="#94A3B8" opacity="0.6" />
                       <circle cx="18" cy="7" r="5"  fill="#94A3B8" opacity="0.6" />
@@ -1224,12 +1223,13 @@ function InventoryAnalysis({ skus, optimized, onDecision, rowStates, onRowStateC
               </div>
 
               {/* Toggle button */}
-              <div className="flex justify-center mt-1">
+              <div className="flex justify-center mt-3">
                 <button onClick={() => setTableOpen(o => !o)}
-                  className="text-[11px] text-indigo-500 hover:text-indigo-700 font-medium flex items-center gap-1 transition-colors">
+                  className="flex items-center gap-2 px-5 py-2 rounded-lg font-semibold text-sm transition-all"
+                  style={{ background: tableOpen ? '#EEF2FF' : '#4F46E5', color: tableOpen ? '#4F46E5' : '#fff', border: '1.5px solid #4F46E5' }}>
                   {tableOpen
-                    ? <><ChevronUp className="w-3 h-3" /> Hide detail table</>
-                    : <><ChevronDown className="w-3 h-3" /> Show detail — {visiblePoints.length} SKU-site pairs</>}
+                    ? <><ChevronUp className="w-4 h-4" /> Hide detail table</>
+                    : <><ChevronDown className="w-4 h-4" /> View SKU detail — {visiblePoints.length} SKU-site pairs</>}
                 </button>
               </div>
             </div>
@@ -1396,7 +1396,7 @@ function ActionList({ skus, optimized, scenario, summary }) {
 
   return (
     <div className="bg-white border border-border-light rounded-xl p-5 flex flex-col">
-      <div className="text-sm font-semibold text-ink mb-0.5">This Cycle's Decisions</div>
+      <div className="text-sm font-semibold text-ink mb-0.5">This Cycle's Suggested Actions</div>
       <div className="text-xs text-muted mb-4">Prioritised actions for the supply review</div>
       <div className="space-y-2.5 flex-1">
         {items.map((item, i) => (
@@ -1437,7 +1437,6 @@ function ActionList({ skus, optimized, scenario, summary }) {
 const DECISION_STYLE = {
   INCREASE: { bg: '#FFF7ED', text: '#B45309', label: '▲ INCREASE' },
   REDUCE:   { bg: '#EFF6FF', text: '#1D4ED8', label: '▼ REDUCE' },
-  MAINTAIN: { bg: '#F0FDF4', text: '#166534', label: '◆ MAINTAIN' },
 };
 
 const PLANNER_ACTION_STYLE = {
@@ -1543,7 +1542,7 @@ function OptimizationTable({ optimized, totalCount, highlightedSku, onDecision, 
   const urgencyRank = { critical: 0, high: 1, medium: 2, low: 3 };
 
   const rows = optimized
-    .filter(s => filter === 'all' || s.decision !== 'MAINTAIN')
+    .filter(s => filter === 'all' || s.decision === filter)
     .map(s => ({ ...s, urgencyRank: urgencyRank[s.urgency] ?? 4 }))
     .sort((a, b) => {
       const v = sort.dir * (a[sort.key] < b[sort.key] ? -1 : a[sort.key] > b[sort.key] ? 1 : 0);
@@ -1691,8 +1690,8 @@ const CI_LEVERS = [
     category: 'Demand Planning',
     categoryColor: '#0F766E',
     categoryBg: '#F0FDFA',
-    summary: '5 SKUs show demand CV > 0.30 — above the biopharma benchmark of 0.25. Integrating hospital ordering data and patient registry signals could reduce CV by 20–35%, directly shrinking MEIO safety stock targets.',
-    effort: 'Medium',
+    summary: '5 SKUs show demand CV > 0.30 — above the biopharma benchmark of 0.25. Integrating patient registry signals, epidemiology data, and specialty pharmacy dispensing feeds can reduce forecast error by 25–30% and CV by 20–35%, directly shrinking MEIO safety stock targets.',
+    effort: 'High',
     impact: 'High',
     timeframe: '3–6 months',
     tradeoffs: [
@@ -1708,15 +1707,15 @@ const CI_LEVERS = [
     category: 'Supply Chain',
     categoryColor: '#B45309',
     categoryBg: '#FFFBEB',
-    summary: 'Actual lead times are running 15–28% above plan for 4 SKUs, driven by the cross-border sea freight leg (3–5 weeks). Switching Class A biologics from sea to air freight eliminates this leg — reducing MEIO safety stock by ~18% with no change to CMO schedules.',
+    summary: 'Actual lead times are running 15–28% above plan for 4 SKUs, driven by the cross-border sea freight leg (3–5 weeks). Switching Class A biologics to air freight cuts SS by ~18%, releasing ~$8M WC. At 22% cold-chain holding cost, the annual saving (~$1.8M) more than offsets the freight premium (~$1.2M) — a net +$600K/yr.',
     effort: 'Medium',
-    impact: 'High',
+    impact: 'Medium',
     timeframe: '2–4 months',
     tradeoffs: [
       { label: 'SS reduction (Class A SKUs)', value: '~18%', good: true },
-      { label: 'WC freed (est.)', value: '~$2.9M', good: true },
-      { label: 'Air freight premium vs sea', value: '~$0.3M/yr', good: false },
-      { label: 'Net annual benefit', value: '~$2.6M', good: true },
+      { label: 'WC freed — near-term release', value: '~$8M', good: true },
+      { label: 'Annual holding cost saving (22%)', value: '~$1.8M/yr', good: true },
+      { label: 'Air freight premium vs sea', value: '~$1.2M/yr', good: false },
     ],
   },
   {
@@ -1725,13 +1724,13 @@ const CI_LEVERS = [
     category: 'Network Design',
     categoryColor: '#4F46E5',
     categoryBg: '#EEF2FF',
-    summary: 'Current inventory is held across 4 regional DCs. Consolidating Class-C/B biologics to 2 central hubs leverages statistical risk pooling — reducing aggregate safety stock by ~29% through demand aggregation.',
-    effort: 'High',
-    impact: 'Medium',
+    summary: 'Current inventory is held across 4 regional DCs. Consolidating Class-C/B biologics to 2 central hubs leverages statistical risk pooling — reducing aggregate safety stock by ~29% through demand aggregation, releasing ~$4M in working capital.',
+    effort: 'Medium',
+    impact: 'High',
     timeframe: '6–12 months',
     tradeoffs: [
       { label: 'Pooled SS reduction', value: '~29%', good: true },
-      { label: 'WC freed (est.)', value: '~$1.8M', good: true },
+      { label: 'WC freed (est.)', value: '~$4M', good: true },
       { label: 'Distribution lead time', value: '+1–2 days', good: false },
       { label: 'DC consolidation cost', value: '$0.4M one-off', good: false },
     ],
@@ -1805,21 +1804,21 @@ function DemandVolatilityDD({ skus }) {
         </div>
         <div className="mt-2 text-xs text-muted">Total excess safety stock attributable to above-benchmark CV: <strong className="text-ink">${totalSSImpact.toLocaleString()}K</strong></div>
       </DDSection>
-      <DDSection title="Demand signal improvement levers">
+      <DDSection title="Demand signal inputs that can actually improve accuracy">
         <div className="grid grid-cols-1 gap-2">
-          <DDInsight icon="🏥" label="Hospital ordering system integration" value="Reduces lag 8–10 days" good={true} />
-          <DDInsight icon="📋" label="Patient registry / treatment initiation signals" value="Reduces CV ~15–20%" good={true} />
-          <DDInsight icon="📊" label="Consensus forecast with commercial teams (S&OP)" value="Reduces bias ≈ 12%" good={true} />
-          <DDInsight icon="🔁" label="Model retraining cadence (currently quarterly)" value="Move to monthly" good={null} />
+          <DDInsight icon="📋" label="Patient registry — treatment initiation, persistence & discontinuation rates" value="Replaces lagged order signal with real patient flow; reduces CV ~15–20%" good={true} />
+          <DDInsight icon="🧬" label="Epidemiology data — disease prevalence, incidence & diagnosis rates by market" value="Anchors forecast to patient population; critical for specialty biologics" good={true} />
+          <DDInsight icon="💊" label="Specialty pharmacy dispensing data — Rx fill rates & refill patterns" value="Captures real consumption vs channel buy-in; removes stocking distortion" good={true} />
+          <DDInsight icon="📑" label="Payer & claims data — reimbursement approvals & patient adherence" value="Leading indicator of demand step-changes from formulary shifts" good={true} />
+          <DDInsight icon="🔁" label="Model retraining cadence — currently quarterly" value="Move to monthly; integrate hybrid epidemiology + time-series model" good={null} />
         </div>
       </DDSection>
       <DDSection title="Recommended next steps">
         <DDNextSteps steps={[
-          'Pull 24-month actuals vs forecast by SKU — identify systematic bias vs noise-driven CV.',
-          'Engage hospital procurement teams for SKUs A-001, A-004, A-005 to establish EDI order feeds.',
-          'Connect with patient services for A-002, A-003 to obtain treatment initiation signals (GDPR-compliant aggregated data).',
-          'Refit MEIO demand model monthly instead of quarterly; re-run safety stock optimisation after 2 cycles.',
-          'Set CV ≤ 0.25 as a KPI in the S&OP scorecard and review in Monthly Business Review.',
+          'Pull 24-month actuals vs forecast by SKU — decompose systematic bias from noise-driven CV to identify which input addresses each SKU\'s root distortion.',
+          'Assess data availability: engage patient services, medical affairs, and specialty pharmacy partners to map which signals (patient registry, Rx dispensing, EMR) are accessible and at what cost.',
+          'Size the economic opportunity: estimate SS reduction and WC release potential per SKU if CV targets are met — establish the prize before committing to integration.',
+          'Build business case: total data integration and model refit investment vs projected WC release and service level uplift — validate economics before proceeding to full implementation.',
         ]} />
       </DDSection>
     </div>
@@ -1838,9 +1837,10 @@ function LeadTimeVsPlanDD({ skus }) {
     const ssSea  = s.meioSafetyStock;
     const ssAir  = Math.round(s.meioSafetyStock * Math.sqrt(airLT) / Math.sqrt(seaLT));
     const ssDelta = ssSea - ssAir;
-    const wcSaved = Math.round(ssDelta * s.unitCost / 1000);
-    // Air freight cost premium: ~$8/kg for biopharma, avg 10kg/unit assumed
-    const airFreightPremium = Math.round(s.plannedSupply ? s.plannedSupply[0] * 10 * 8 / 1000 : seaLT * 12);
+    // WC realizability: ~30% of theoretical SS reduction converts near-term (batch & shelf-life constraints)
+    const wcSaved = Math.round(ssDelta * s.unitCost * 0.30 / 1000);
+    // Air freight cost premium: ~$35/kg incremental over sea for cold-chain biopharma (chartered lanes with volume commitment)
+    const airFreightPremium = Math.round(s.plannedSupply ? s.plannedSupply[0] * 10 * 35 / 1000 : seaLT * 50);
     return { id: s.id, name: s.name, abcClass: s.abcClass, seaLT, airLT, ssSea, ssAir, ssDelta, wcSaved, airFreightPremium };
   });
 
@@ -1876,13 +1876,13 @@ function LeadTimeVsPlanDD({ skus }) {
 
       <DDSection title="Cost-benefit: air freight premium vs safety stock saving">
         <div className="grid grid-cols-1 gap-2">
-          <DDInsight label="Total SS working capital released" value={`~$${totalWcSaved.toLocaleString()}K`} good={true} />
-          <DDInsight label="Annual air freight premium (est. vs sea)" value={`~$${totalFreight.toLocaleString()}K`} good={false} />
-          <DDInsight label="Net annual benefit" value={netBenefit >= 0 ? `~$${netBenefit.toLocaleString()}K` : `−$${Math.abs(netBenefit).toLocaleString()}K`} good={netBenefit >= 0} />
-          <DDInsight label="Holding cost saving (one-time WC release × holding rate)" value={`~$${Math.round(totalWcSaved * 0.02).toLocaleString()}K/yr`} good={true} />
+          <DDInsight label="Near-term WC release (SS reduction, ~30% realisable)" value={`~$${(totalWcSaved / 1000).toFixed(0)}M`} good={true} />
+          <DDInsight label="Annual holding cost saving (WC × 22% — cold storage, CoC, expiry risk)" value={`~$${(totalWcSaved * 0.22 / 1000).toFixed(1)}M/yr`} good={true} />
+          <DDInsight label="Annual air freight premium vs sea" value={`~$${(totalFreight / 1000).toFixed(1)}M/yr`} good={false} />
+          <DDInsight label="Net annual benefit" value={(() => { const net = Math.round(totalWcSaved * 0.22) - totalFreight; return net >= 0 ? `+$${(net/1000).toFixed(1)}M/yr` : `−$${(Math.abs(net)/1000).toFixed(1)}M/yr`; })()} good={Math.round(totalWcSaved * 0.22) >= totalFreight} />
         </div>
         <div className="mt-2 bg-amber-50 border border-amber-200 rounded-lg px-4 py-2.5 text-xs text-amber-900">
-          <strong>Note:</strong> Air freight economics depend on shipment frequency and weight. High-value, low-volume biologics (Class A) typically justify air on unit economics alone — the WC saving per kg shipped far exceeds the freight premium. Class B/C SKUs require case-by-case review.
+          <strong>Note:</strong> Cold-chain biologic holding costs run ~22%/yr (cost of capital + cold storage + expiry/obsolescence risk + insurance) — well above the 2% rate used for ambient goods. This makes the WC release significantly more valuable on an annual basis and is the key reason air freight economics work for high-value Class A biologics.
         </div>
       </DDSection>
 
@@ -1897,11 +1897,10 @@ function LeadTimeVsPlanDD({ skus }) {
 
       <DDSection title="Recommended next steps">
         <DDNextSteps steps={[
-          'Pull shipment records by SKU for last 12 months — calculate average sea transit time and actual vs planned LT split by leg.',
-          'Run freight cost quote with logistics partner for air conversion of Class A SKUs (A-001, A-002, A-003, A-004, A-005).',
-          'Model MEIO re-run with air LT inputs — confirm SS reduction and update working capital forecast.',
-          'Negotiate volume-based air freight rates; consider dedicated charter for cold-chain Class A shipments.',
-          'Update MEIO planned lead times to air LT for converted SKUs; re-run safety stock optimisation.',
+          'Pull shipment records by SKU for last 12 months — calculate average sea transit time and actual vs planned LT split by leg to confirm where the overrun originates.',
+          'Model MEIO re-run with air LT inputs — quantify SS reduction and WC release potential per SKU to establish the prize before engaging any vendor.',
+          'Run indicative freight cost quote with logistics partner for Class A SKUs — benchmark against the 4–6× per-kg air premium for cold-chain biopharma cargo.',
+          'Build business case: net WC release vs total freight cost increase — validate overall economics before committing to any conversion.',
         ]} />
       </DDSection>
     </div>
@@ -1915,7 +1914,8 @@ function NetworkCentralizationDD({ skus }) {
   const poolingFactor = Math.sqrt(n_target) / Math.sqrt(n_current);
   const candidateSkus = abcSkus.filter(s => s.abcClass !== 'A' || s.echelon === 'Distribution');
   const totalSS = candidateSkus.reduce((a, s) => a + s.meioSafetyStock * s.unitCost, 0);
-  const savedSS = Math.round(totalSS * (1 - poolingFactor) / 1e6 * 10) / 10;
+  // Cash conversion factor: pooling savings realised over 12–18 months as stock naturally depletes (~16% near-term)
+  const savedSS = Math.round(totalSS * (1 - poolingFactor) * 0.16 / 1e6 * 10) / 10;
   return (
     <div className="space-y-5 fade-in">
       <DDSection title="Risk pooling: the statistical case">
@@ -1944,19 +1944,19 @@ function NetworkCentralizationDD({ skus }) {
       </DDSection>
       <DDSection title="Network design considerations">
         <div className="grid grid-cols-1 gap-2">
-          <DDInsight icon="❄️" label="Cold-chain continuity at consolidated hubs" value="GDP audit required" good={null} />
-          <DDInsight icon="📦" label="Class-A SKUs (coldchain, high-value)" value="Keep at current DCs" good={null} />
-          <DDInsight icon="⏱" label="Distribution lead time increase (B/C SKUs)" value="+1–2 days" good={false} />
-          <DDInsight icon="💰" label="DC lease consolidation savings" value="~$0.4M/yr" good={true} />
+          <DDInsight icon="❄️" label="Cold-chain vs ambient: which SKUs require dedicated cold hubs?" value="Determines hub GDP requirements" good={null} />
+          <DDInsight icon="💊" label="Which products are candidates for pooling (Class B/C biologics only)?" value="Class A stays at current DCs" good={null} />
+          <DDInsight icon="🔗" label="Products to combine at each hub — demand correlation & compatibility" value="Low-correlation SKUs gain most from pooling" good={null} />
+          <DDInsight icon="🚚" label="Transportation lane impact: hub-to-market lead time delta" value="+1–2 days for consolidated lanes" good={false} />
+          <DDInsight icon="🏭" label="DC infrastructure: capacity, GDP certification, and lease economics" value="~$0.4M/yr lease consolidation saving" good={true} />
         </div>
       </DDSection>
       <DDSection title="Recommended next steps">
         <DDNextSteps steps={[
-          'Model demand by DC for B- and C-class SKUs over 24 months — confirm pooling savings vs demand pattern.',
-          'Identify 2 hub DC candidates based on patient geography and GDP-certified cold-chain capabilities.',
-          'Run service level simulation: confirm pooled model maintains SL ≥ 98% for Class-B at 2 hubs.',
-          'Develop DC transition plan: phase out DC 3 and DC 4 over 6 months while maintaining stock coverage.',
-          'Negotiate new 3PL contracts for consolidated hubs with built-in volume commitments.',
+          'Model demand and inventory by DC for B- and C-class SKUs over 24 months — confirm pooling savings vs actual demand pattern.',
+          'Identify 2 hub DC candidates based on patient geography, cold-chain GDP certification, and transportation lane coverage.',
+          'Run service level simulation: confirm pooled model maintains SL ≥ 98% for Class-B and SL ≥ 95% for Class-C at 2 consolidated hubs.',
+          'Build business case: quantify total cost savings (SS reduction + DC lease) vs consolidation investment and service level risk before committing to a transition plan.',
         ]} />
       </DDSection>
     </div>
@@ -2078,7 +2078,7 @@ function CILeverDrillDown({ lever, skus, onBack }) {
 export function CIAgentPanel({ skus, optimized }) {
   const [activeLever, setActiveLever] = useState(null);
   const totalSkus = skus.length;
-  const actionRequired = optimized.filter(s => s.decision !== 'MAINTAIN').length;
+  const actionRequired = optimized.length;
   const inRangeCount = skus.filter(s => {
     const min = s.meioSafetyStock * MEIO_RANGE_MIN_MULT;
     const max = s.meioSafetyStock * MEIO_RANGE_MAX_MULT;
@@ -2117,7 +2117,7 @@ export function CIAgentPanel({ skus, optimized }) {
         <div className="mt-3 bg-violet-50 border border-violet-200 rounded-lg px-4 py-2.5 flex items-start gap-2">
           <Info className="w-3.5 h-3.5 text-violet-600 shrink-0 mt-0.5" />
           <p className="text-xs text-violet-900 leading-relaxed">
-            These levers address <strong>root causes</strong> of elevated MEIO targets — demand variability, manufacturing strategy, lead time, network structure, and quality release.
+            These levers address the key <strong>inputs</strong> driving elevated MEIO targets — demand variability, manufacturing strategy, lead time, network structure, and quality release.
             Implementing them permanently shifts the MEIO baseline downward. Click <strong>Deep Dive</strong> on any lever to see the full analysis.
           </p>
         </div>
@@ -2192,26 +2192,6 @@ function DemandRevenueChart({ skus }) {
 
       {open && (
         <div className="border-t border-border-light px-5 pb-5 pt-4">
-          {/* Quadrant legend */}
-          <div className="grid grid-cols-2 gap-2 mb-4 text-[10px]">
-            <div className="bg-teal-50 border border-teal-200 rounded-lg px-3 py-2">
-              <span className="font-bold text-teal-700">↖ Low volatility · High revenue</span>
-              <p className="text-teal-600 mt-0.5 leading-relaxed">Prime candidates for tighter SS targets — stable demand allows lean inventory without service risk.</p>
-            </div>
-            <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-              <span className="font-bold text-amber-700">↗ High volatility · High revenue</span>
-              <p className="text-amber-600 mt-0.5 leading-relaxed">Require larger buffers — revenue exposure is high and demand is unpredictable. Prioritise supply reliability.</p>
-            </div>
-            <div className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
-              <span className="font-bold text-slate-600">↙ Low volatility · Low revenue</span>
-              <p className="text-slate-500 mt-0.5 leading-relaxed">Standard MEIO policy applies — working capital release candidates if over-stocked.</p>
-            </div>
-            <div className="bg-red-50 border border-red-200 rounded-lg px-3 py-2">
-              <span className="font-bold text-red-600">↘ High volatility · Low revenue</span>
-              <p className="text-red-500 mt-0.5 leading-relaxed">Consider simplification — complex replenishment for low-value SKUs. Review service level targets.</p>
-            </div>
-          </div>
-
           {/* Bubble size legend */}
           <div className="flex items-center gap-2 mb-3 text-[11px] text-slate-400">
             <svg width="44" height="16" viewBox="0 0 44 16">
@@ -2222,56 +2202,85 @@ function DemandRevenueChart({ skus }) {
             Bubble size = current inventory value (on-hand units × unit cost)
           </div>
 
-          <ResponsiveContainer width="100%" height={320}>
-            <ScatterChart margin={{ top: 10, right: 24, left: 60, bottom: 36 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#F1F5F9" />
-              <XAxis
-                type="number" dataKey="demandVolCV" name="Demand Volatility (CV %)"
-                tick={{ fill: '#94A3B8', fontSize: 10 }}
-                label={{ value: 'Demand Volatility — Coefficient of Variation (%)', position: 'insideBottom', offset: -16, fontSize: 10, fill: '#94A3B8' }}
-              />
-              <YAxis
-                type="number" dataKey="annualRevenue" name="Annual Revenue"
-                tick={{ fill: '#94A3B8', fontSize: 10 }}
-                tickFormatter={fmtRev}
-                width={60}
-                label={{ value: 'Annual Revenue', angle: -90, position: 'insideLeft', offset: -44, fontSize: 10, fill: '#94A3B8' }}
-              />
-              <ZAxis range={[36, 400]} />
-              <Tooltip
-                cursor={{ strokeDasharray: '3 3' }}
-                content={({ active, payload }) => {
-                  if (!active || !payload?.length) return null;
-                  const d = payload[0].payload;
-                  return (
-                    <div className="bg-white border border-border-light rounded-lg px-3 py-2 text-xs shadow-lg">
-                      <div className="font-semibold text-ink">{d.id} — {d.name}</div>
-                      <div className="flex items-center gap-1.5 mt-1">
-                        <span className="w-2 h-2 rounded-full inline-block" style={{ background: d.color }} />
-                        <span className="text-muted">Class {d.abcClass}</span>
-                      </div>
-                      <div className="text-muted mt-1">Demand CV: <span className="font-semibold text-ink">{d.demandVolCV}%</span></div>
-                      <div className="text-muted">Annual Revenue: <span className="font-semibold text-ink">{fmtRev(d.annualRevenue)}</span></div>
-                    </div>
-                  );
-                }}
-              />
-              {abcGroups.map(g => (
-                <Scatter
-                  key={g.cls}
-                  name={`Class ${g.cls}`}
-                  data={g.points}
-                  fill={g.color}
-                  shape={<ChartDot />}
-                />
-              ))}
-              <Legend
-                verticalAlign="top"
-                wrapperStyle={{ fontSize: 11, paddingBottom: 4 }}
-                formatter={(value, entry) => <span style={{ color: entry.color }}>{value}</span>}
-              />
-            </ScatterChart>
-          </ResponsiveContainer>
+          {(() => {
+            const allCV  = skuPoints.map(p => p.demandVolCV);
+            const allRev = skuPoints.map(p => p.annualRevenue);
+            const xMid   = (Math.min(...allCV)  + Math.max(...allCV))  / 2;
+            const yMid   = (Math.min(...allRev) + Math.max(...allRev)) / 2;
+            const xMax   = Math.ceil(Math.max(...allCV) / 10) * 10;
+            const yMax   = 500e6;
+
+            // Corner-anchored label: align = 'tl' | 'tr' | 'bl' | 'br'
+            const mkLabel = (text, subtext, color, align) => ({ viewBox }) => {
+              const { x, y, width, height } = viewBox;
+              const pad = 10;
+              const isLeft  = align[1] === 'l';
+              const isTop   = align[0] === 't';
+              const tx      = isLeft ? x + pad : x + width - pad;
+              const ty      = isTop  ? y + pad + 11 : y + height - pad - 14;
+              const anchor  = isLeft ? 'start' : 'end';
+              return (
+                <g pointerEvents="none">
+                  <text x={tx} y={ty}      textAnchor={anchor} fontSize="10" fontWeight="700" fill={color} opacity="0.9">{text}</text>
+                  <text x={tx} y={ty + 13} textAnchor={anchor} fontSize="8.5" fill={color} opacity="0.65">{subtext}</text>
+                </g>
+              );
+            };
+
+            return (
+              <ResponsiveContainer width="100%" height={360}>
+                <ScatterChart margin={{ top: 10, right: 24, left: 60, bottom: 36 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#F1F5F9" />
+                  <XAxis type="number" dataKey="demandVolCV" name="Demand Volatility (CV %)"
+                    domain={[0, xMax]} tick={{ fill: '#94A3B8', fontSize: 10 }}
+                    label={{ value: 'Demand Volatility — Coefficient of Variation (%)', position: 'insideBottom', offset: -16, fontSize: 10, fill: '#94A3B8' }} />
+                  <YAxis type="number" dataKey="annualRevenue" name="Annual Revenue"
+                    domain={[0, yMax]} tick={{ fill: '#94A3B8', fontSize: 10 }}
+                    tickFormatter={fmtRev} width={60}
+                    label={{ value: 'Annual Revenue', angle: -90, position: 'insideLeft', offset: -44, fontSize: 10, fill: '#94A3B8' }} />
+                  <ZAxis range={[36, 400]} />
+
+                  {/* Quadrant background shading */}
+                  <ReferenceArea x1={0} x2={xMid} y1={yMid} y2={yMax} fill="#DCFCE7" fillOpacity={0.55} />
+                  <ReferenceArea x1={xMid} x2={xMax} y1={yMid} y2={yMax} fill="#FEF9C3" fillOpacity={0.55} />
+                  <ReferenceArea x1={0} x2={xMid} y1={0} y2={yMid} fill="#F1F5F9" fillOpacity={0.55} />
+                  <ReferenceArea x1={xMid} x2={xMax} y1={0} y2={yMid} fill="#FEE2E2" fillOpacity={0.55} />
+
+                  {/* Crosshair dividers */}
+                  <ReferenceLine x={xMid} stroke="#94A3B8" strokeDasharray="6 3" strokeWidth={1.5} />
+                  <ReferenceLine y={yMid} stroke="#94A3B8" strokeDasharray="6 3" strokeWidth={1.5} />
+
+                  {/* Corner-anchored quadrant labels */}
+                  <ReferenceArea x1={0} x2={xMid} y1={yMid} y2={yMax} fill="transparent" label={mkLabel('Low volatility · High revenue',  'Tighter SS targets — stable demand, lean inventory',    '#0F766E', 'tl')} />
+                  <ReferenceArea x1={xMid} x2={xMax} y1={yMid} y2={yMax} fill="transparent" label={mkLabel('High volatility · High revenue', 'Larger buffers — prioritise supply reliability',         '#B45309', 'tr')} />
+                  <ReferenceArea x1={0} x2={xMid} y1={0} y2={yMid} fill="transparent" label={mkLabel('Low volatility · Low revenue',   'Standard MEIO policy — WC release candidates',          '#475569', 'bl')} />
+                  <ReferenceArea x1={xMid} x2={xMax} y1={0} y2={yMid} fill="transparent" label={mkLabel('High volatility · Low revenue',  'Simplify — review service level targets',                '#DC2626', 'br')} />
+
+                  <Tooltip cursor={{ strokeDasharray: '3 3' }}
+                    content={({ active, payload }) => {
+                      if (!active || !payload?.length) return null;
+                      const d = payload[0].payload;
+                      return (
+                        <div className="bg-white border border-border-light rounded-lg px-3 py-2 text-xs shadow-lg">
+                          <div className="font-semibold text-ink">{d.id} — {d.name}</div>
+                          <div className="flex items-center gap-1.5 mt-1">
+                            <span className="w-2 h-2 rounded-full inline-block" style={{ background: d.color }} />
+                            <span className="text-muted">Class {d.abcClass}</span>
+                          </div>
+                          <div className="text-muted mt-1">Demand CV: <span className="font-semibold text-ink">{d.demandVolCV}%</span></div>
+                          <div className="text-muted">Annual Revenue: <span className="font-semibold text-ink">{fmtRev(d.annualRevenue)}</span></div>
+                        </div>
+                      );
+                    }} />
+                  {abcGroups.map(g => (
+                    <Scatter key={g.cls} name={`Class ${g.cls}`} data={g.points} fill={g.color} shape={<ChartDot />} />
+                  ))}
+                  <Legend verticalAlign="top" wrapperStyle={{ fontSize: 11, paddingBottom: 4 }}
+                    formatter={(value, entry) => <span style={{ color: entry.color }}>{value}</span>} />
+                </ScatterChart>
+              </ResponsiveContainer>
+            );
+          })()}
         </div>
       )}
     </div>
@@ -2658,14 +2667,9 @@ function PlannerHeader({ skus, lastRun, rerunState, onRerunMEIO }) {
 
   return (
     <div className="space-y-3">
-      {/* Page title row */}
+      {/* KPI strip + Re-run button */}
       <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-base font-bold text-ink">Inventory Plan — MEIO-Driven</h1>
-          <p className="text-xs text-muted mt-0.5">
-            Safety stock targets from Multi-Echelon Inventory Optimisation · last run: <span className="font-semibold text-slate-600">{lastRun}</span>
-          </p>
-        </div>
+        <div />
         <div className="flex flex-col items-end gap-2 shrink-0">
           <button
             onClick={onRerunMEIO}
@@ -2897,11 +2901,11 @@ export default function PlanningView({ skus, scenario, setScenario, ssMultiplier
         </div>
       )}
 
-      {/* MEIO methodology — collapsible drill-down */}
-      <MEIOBaseline skus={skus} optimized={optimized} ssMultipliers={ssMultipliers} scenario={scenario} />
-
-      {/* ABC classification legend */}
-      <ABCLegend />
+      {/* Page title */}
+      <div>
+        <h1 className="text-base font-bold text-ink">Inventory Plan — MEIO-Driven Calculations</h1>
+        <p className="text-xs text-muted mt-0.5">Baseline safety stock and inventory targets calculated by MEIO. Recalculate each quarter or after major demand/supply changes.</p>
+      </div>
 
       {/* Planner header — 3-card KPI strip */}
       <PlannerHeader
@@ -2910,6 +2914,12 @@ export default function PlanningView({ skus, scenario, setScenario, ssMultiplier
         rerunState={rerunState}
         onRerunMEIO={handleRerunMEIO}
       />
+
+      {/* MEIO methodology — collapsible drill-down */}
+      <MEIOBaseline skus={skus} optimized={optimized} ssMultipliers={ssMultipliers} scenario={scenario} />
+
+      {/* ABC classification legend */}
+      <ABCLegend />
 
       {/* Inventory Analysis — model results */}
       <InventoryAnalysis

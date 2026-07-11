@@ -155,6 +155,7 @@ export default function SimulationChat({ skus, onDecision, scenarios, onScenario
       <ScenarioWorkspace
         key={activeId}
         scenario={activeScenario}
+        skus={skus}
         onSave={handleSave}
         onBack={handleBack}
         onUpdate={(updates) => updateScenario(activeId, updates)}
