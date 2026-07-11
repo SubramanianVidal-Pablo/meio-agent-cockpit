@@ -1707,7 +1707,7 @@ const CI_LEVERS = [
     category: 'Supply Chain',
     categoryColor: '#B45309',
     categoryBg: '#FFFBEB',
-    summary: 'Actual lead times are running 15–28% above plan for 4 SKUs, driven by the cross-border sea freight leg (3–5 weeks). Switching Class A biologics to air freight cuts SS by ~18%, releasing ~$8M WC. At 22% cold-chain holding cost, the annual saving (~$1.8M) more than offsets the freight premium (~$1.2M) — a net +$600K/yr.',
+    summary: 'Lead times are running 15–28% above plan for 4 SKUs, driven by the sea freight leg (3–5 wks). Switching Class A biologics to air cuts SS by ~18% and releases ~$8M WC — a net +$600K/yr after freight premium.',
     effort: 'Medium',
     impact: 'Medium',
     timeframe: '2–4 months',
@@ -1876,6 +1876,9 @@ function LeadTimeVsPlanDD({ skus }) {
 
       <DDSection title="Cost-benefit: air freight premium vs safety stock saving">
         <div className="grid grid-cols-1 gap-2">
+          <DDInsight label="Sea freight rate (cold-chain, chartered lane)" value="~$4–6/kg" good={null} />
+          <DDInsight label="Air freight rate (temperature-controlled, volume-committed)" value="~$35–55/kg — 4–6× sea" good={null} />
+          <DDInsight label="Incremental freight premium per kg (air vs sea)" value="~$35/kg" good={false} />
           <DDInsight label="Near-term WC release (SS reduction, ~30% realisable)" value={`~$${(totalWcSaved / 1000).toFixed(0)}M`} good={true} />
           <DDInsight label="Annual holding cost saving (WC × 22% — cold storage, CoC, expiry risk)" value={`~$${(totalWcSaved * 0.22 / 1000).toFixed(1)}M/yr`} good={true} />
           <DDInsight label="Annual air freight premium vs sea" value={`~$${(totalFreight / 1000).toFixed(1)}M/yr`} good={false} />
