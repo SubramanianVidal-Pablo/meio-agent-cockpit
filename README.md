@@ -189,7 +189,17 @@ Vercel serverless function that forwards requests to Anthropic. The `ANTHROPIC_A
 
 ---
 
-## 9. Common Tasks
+## 9. Picking up in Claude Code
+
+Open the project folder in Claude Code, then start with this prompt:
+
+> "I'm working on the MEIO Agent Cockpit — a React/Vite/Tailwind biopharma inventory planning app. The main files are `src/components/PlanningView.jsx` (planning tab, decisions queue, CI levers), `src/components/OperationsDashboard.jsx` (ops review tab), `src/components/ScenarioWorkspace.jsx` (AI chatbot and KPI logic), and `src/data/skuData.js` (all SKU data). Please read those four files and then [describe what you want to change]."
+
+Alternatively, drag those four files directly into the Claude Code chat before describing your task — it will have all the context it needs without any further prompting.
+
+---
+
+## 10. Common Tasks
 
 **Change the Claude model**
 In `api/anthropic.js`, find the `model:` field and update it. Current: `claude-opus-4-7`.
