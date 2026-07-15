@@ -51,6 +51,12 @@ To give a new team member push access:
 
 Prerequisites: **Node.js 18+** and **Git** installed.
 
+> **Corporate network / SSL issue?** If `npm install` fails with an SSL error, run this first:
+> ```bash
+> npm config set strict-ssl false
+> ```
+> This is commonly needed on BCG or other corporate networks that use SSL inspection.
+
 ```bash
 # 1. Clone the repo
 git clone https://github.com/SubramanianVidal-Pablo/meio-agent-cockpit.git
